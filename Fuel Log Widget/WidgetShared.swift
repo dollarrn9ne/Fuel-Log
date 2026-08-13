@@ -93,6 +93,52 @@ enum WidgetFormatting {
         let suffix = unit == .miles ? "mi" : "km"
         return "\(Int(distance.rounded())) \(suffix)"
     }
+
+    static func distanceUnitSuffix(_ odometerUnitRaw: String) -> String {
+        (OdometerUnit(rawValue: odometerUnitRaw) ?? .miles) == .miles ? "mi" : "km"
+    }
+
+    /// Whole number with thousands separators (odometer, etc.).
+    static func wholeNumber(_ value: Double) -> String {
+        Int(value.rounded()).formatted()
+    }
+
+    /// "Today" / "Yesterday" / "N days ago" from a date.
+    static func daysAgoText(_ date: Date) -> String {
+        let days = Calendar.current.dateComponents([.day], from: Calendar.current.startOfDay(for: date), to: Calendar.current.startOfDay(for: Date())).day ?? 0
+        switch days {
+        case ..<0: return "Scheduled"
+        case 0: return "Today"
+        case 1: return "Yesterday"
+        default: return "\(days) days ago"
+        }
+    }
+
+    /// Fraction (0...1) of the way to the next service, for gauges.
+    static func maintenanceProgress(_ vehicle: FuelLogWidgetVehicle) -> Double {
+        guard vehicle.maintenanceInterval > 0, let remaining = vehicle.maintenanceRemainingDistance else { return 0 }
+        let used = vehicle.maintenanceInterval - remaining
+        return min(1, max(0, used / vehicle.maintenanceInterval))
+    }
+}
+
+// MARK: - Widget Container Background
+
+extension View {
+    /// Applies an appropriate container background for the given family: a solid
+    /// card on the Home Screen, the subtle accessory backdrop on Lock Screen /
+    /// StandBy circular & rectangular, and none for inline.
+    @ViewBuilder
+    func fuelLogWidgetBackground(_ family: WidgetFamily) -> some View {
+        switch family {
+        case .accessoryCircular, .accessoryRectangular:
+            self.containerBackground(for: .widget) { AccessoryWidgetBackground() }
+        case .accessoryInline:
+            self.containerBackground(for: .widget) { Color.clear }
+        default:
+            self.containerBackground(for: .widget) { Color(uiColor: .systemBackground) }
+        }
+    }
 }
 
 // MARK: - Placeholder Vehicle
@@ -117,7 +163,11 @@ extension FuelLogWidgetVehicle {
             maintenanceNextDate: Date().addingTimeInterval(35 * 86400),
             maintenanceRemainingDistance: 1240,
             maintenanceInterval: 5000,
-            maintenanceIntervalMonths: 6
+            maintenanceIntervalMonths: 6,
+            lastPricePerUnit: 4.29,
+            thisYearFuelSpend: 1180.50,
+            thisYearServiceSpend: 240.00,
+            recentEfficiencyPoints: [27.4, 29.1, 28.2, 30.6, 31.0, 29.8, 32.4, 31.2]
         )
     }
 }

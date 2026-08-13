@@ -16,6 +16,9 @@ public struct FuelLogWidgetSnapshot: Codable, Sendable {
 
     public static let appGroupIdentifier = "group.com.motosung.fuellog"
     public static let storeKey = "fuelLogWidgetSnapshot"
+    /// App Group key a Control writes to request the app open a quick action
+    /// (e.g. "addFuel") the next time it becomes active.
+    public static let pendingActionKey = "pendingControlAction"
 }
 
 public struct FuelLogWidgetVehicle: Codable, Hashable, Identifiable, Sendable {
@@ -37,6 +40,11 @@ public struct FuelLogWidgetVehicle: Codable, Hashable, Identifiable, Sendable {
     public var maintenanceRemainingDistance: Double?
     public var maintenanceInterval: Double
     public var maintenanceIntervalMonths: Double
+    public var lastPricePerUnit: Double?
+    public var thisYearFuelSpend: Double
+    public var thisYearServiceSpend: Double
+    /// Recent per-segment efficiency values (oldest→newest) for a sparkline.
+    public var recentEfficiencyPoints: [Double]
 
     public init(
         id: UUID,
@@ -56,7 +64,11 @@ public struct FuelLogWidgetVehicle: Codable, Hashable, Identifiable, Sendable {
         maintenanceNextDate: Date?,
         maintenanceRemainingDistance: Double?,
         maintenanceInterval: Double,
-        maintenanceIntervalMonths: Double
+        maintenanceIntervalMonths: Double,
+        lastPricePerUnit: Double? = nil,
+        thisYearFuelSpend: Double = 0,
+        thisYearServiceSpend: Double = 0,
+        recentEfficiencyPoints: [Double] = []
     ) {
         self.id = id
         self.name = name
@@ -76,5 +88,9 @@ public struct FuelLogWidgetVehicle: Codable, Hashable, Identifiable, Sendable {
         self.maintenanceRemainingDistance = maintenanceRemainingDistance
         self.maintenanceInterval = maintenanceInterval
         self.maintenanceIntervalMonths = maintenanceIntervalMonths
+        self.lastPricePerUnit = lastPricePerUnit
+        self.thisYearFuelSpend = thisYearFuelSpend
+        self.thisYearServiceSpend = thisYearServiceSpend
+        self.recentEfficiencyPoints = recentEfficiencyPoints
     }
 }

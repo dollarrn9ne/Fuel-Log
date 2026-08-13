@@ -35,6 +35,27 @@ enum WidgetSnapshotUpdater {
             ?? DateInterval(start: now, duration: 60 * 60 * 24 * 31)
         let thisMonthSpend = (v.fillUps ?? []).filter { monthInterval.contains($0.date) }.map(\.totalCost).reduce(0, +)
 
+        // Year-to-date spend (fuel vs. service) and most recent price paid.
+        let yearInterval = calendar.dateInterval(of: .year, for: now)
+            ?? DateInterval(start: now, duration: 60 * 60 * 24 * 365)
+        let thisYearFuelSpend = (v.fillUps ?? []).filter { yearInterval.contains($0.date) }.map(\.totalCost).reduce(0, +)
+        let thisYearServiceSpend = (v.services ?? []).filter { yearInterval.contains($0.date) }.map(\.cost).reduce(0, +)
+        let latestFill = (v.fillUps ?? []).max(by: { $0.date < $1.date })
+        let lastPricePerUnit: Double? = (latestFill?.pricePerUnit).flatMap { $0 > 0 ? $0 : nil }
+
+        // Recent per-segment efficiency values (oldest→newest) for a sparkline,
+        // matching the per-point method used in the in-app charts.
+        let electricEfficiency = v.efficiencyUnit == .miPerKWh || v.efficiencyUnit == .kmPerKWh
+        let sortedFills = (v.fillUps ?? []).sorted { $0.date < $1.date }
+        var efficiencyPoints: [Double] = []
+        for (prev, curr) in zip(sortedFills, sortedFills.dropFirst()) {
+            guard let cOdo = curr.odometer, let pOdo = prev.odometer, cOdo > pOdo, curr.isFullTank else { continue }
+            if (curr.unit == .kwh) != electricEfficiency { continue }
+            guard curr.volume > 0 else { continue }
+            efficiencyPoints.append(EfficiencyConverter.convert(distance: cOdo - pOdo, odometerUnit: v.odometerUnit, volume: curr.volume, fuelUnit: v.fuelUnit, to: v.efficiencyUnit))
+        }
+        let recentEfficiencyPoints = Array(efficiencyPoints.suffix(12))
+
         // Maintenance: whichever comes first (mirrors SmartRemindersManager)
         let relevantServices = v.fuelType == .electric
             ? (v.services ?? [])
@@ -87,7 +108,11 @@ enum WidgetSnapshotUpdater {
             maintenanceNextDate: maintenanceNextDate,
             maintenanceRemainingDistance: remainingDistance,
             maintenanceInterval: v.maintenanceInterval,
-            maintenanceIntervalMonths: v.maintenanceIntervalMonths
+            maintenanceIntervalMonths: v.maintenanceIntervalMonths,
+            lastPricePerUnit: lastPricePerUnit,
+            thisYearFuelSpend: thisYearFuelSpend,
+            thisYearServiceSpend: thisYearServiceSpend,
+            recentEfficiencyPoints: recentEfficiencyPoints
         )
     }
 }

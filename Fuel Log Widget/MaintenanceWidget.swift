@@ -33,17 +33,89 @@ struct MaintenanceProvider: AppIntentTimelineProvider {
 }
 
 struct MaintenanceWidgetView: View {
+    @Environment(\.widgetFamily) private var family
     let entry: MaintenanceEntry
 
     var body: some View {
-        Group {
+        content
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: family == .accessoryInline ? .center : .leading)
+            .fuelLogWidgetBackground(family)
+    }
+
+    @ViewBuilder private var content: some View {
+        switch family {
+        case .accessoryInline: inlineView
+        case .accessoryCircular: circularView
+        case .accessoryRectangular: rectangularView
+        default:
             if let vehicle = entry.vehicle {
                 maintenanceContent(vehicle)
             } else {
                 emptyContent
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder private var inlineView: some View {
+        if let vehicle = entry.vehicle {
+            if vehicle.isMaintenanceDue {
+                Label("Service due", systemImage: "exclamationmark.triangle.fill")
+            } else if let date = vehicle.maintenanceNextDate {
+                Label("Service \(date.formatted(.dateTime.month(.abbreviated).day()))", systemImage: "wrench.and.screwdriver.fill")
+            } else {
+                Label("Service up to date", systemImage: "wrench.and.screwdriver.fill")
+            }
+        } else {
+            Label("Add a vehicle", systemImage: "car.fill")
+        }
+    }
+
+    @ViewBuilder private var circularView: some View {
+        if let vehicle = entry.vehicle {
+            if vehicle.isMaintenanceDue {
+                VStack(spacing: 0) {
+                    Image(systemName: "exclamationmark.triangle.fill").font(.title3)
+                    Text("Due").font(.system(size: 10, weight: .semibold))
+                }
+            } else {
+                Gauge(value: WidgetFormatting.maintenanceProgress(vehicle)) {
+                    Image(systemName: "wrench.and.screwdriver.fill")
+                } currentValueLabel: {
+                    if let remaining = vehicle.maintenanceRemainingDistance {
+                        Text("\(Int(max(0, remaining)))").minimumScaleFactor(0.4).lineLimit(1)
+                    } else {
+                        Image(systemName: "wrench.and.screwdriver.fill")
+                    }
+                }
+                .gaugeStyle(.accessoryCircularCapacity)
+            }
+        } else {
+            Image(systemName: "car.fill").font(.title3)
+        }
+    }
+
+    @ViewBuilder private var rectangularView: some View {
+        if let vehicle = entry.vehicle {
+            VStack(alignment: .leading, spacing: 2) {
+                Label(vehicle.name, systemImage: "wrench.and.screwdriver.fill")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                if vehicle.isMaintenanceDue {
+                    Text("Maintenance Due").font(.headline).foregroundStyle(.red)
+                } else if let date = vehicle.maintenanceNextDate {
+                    Text(date, format: .dateTime.month(.abbreviated).day()).font(.headline)
+                    if let remaining = vehicle.maintenanceRemainingDistance {
+                        Text("\(WidgetFormatting.remainingDistanceText(remaining, odometerUnitRaw: vehicle.odometerUnitRaw)) to go")
+                            .font(.caption2).foregroundStyle(.secondary)
+                    }
+                } else {
+                    Text("All set").font(.headline)
+                }
+            }
+        } else {
+            Label("Add a vehicle", systemImage: "car.fill").font(.caption)
+        }
     }
 
     @ViewBuilder
@@ -103,12 +175,9 @@ struct MaintenanceWidget: Widget {
     var body: some WidgetConfiguration {
         AppIntentConfiguration(kind: Self.kind, intent: VehicleSelectionIntent.self, provider: MaintenanceProvider()) { entry in
             MaintenanceWidgetView(entry: entry)
-                .containerBackground(for: .widget) {
-                    Color(uiColor: .systemBackground)
-                }
         }
         .configurationDisplayName("Next Maintenance")
         .description("Shows when your next service is due — whichever comes first: distance or time.")
-        .supportedFamilies([.systemSmall])
+        .supportedFamilies([.systemSmall, .accessoryInline, .accessoryCircular, .accessoryRectangular])
     }
 }

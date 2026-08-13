@@ -31,50 +31,112 @@ struct EfficiencyProvider: AppIntentTimelineProvider {
 }
 
 struct EfficiencyWidgetView: View {
+    @Environment(\.widgetFamily) private var family
     let entry: EfficiencyEntry
 
+    private var valueText: String? {
+        guard let v = entry.vehicle, let eff = v.averageEfficiency else { return nil }
+        return WidgetFormatting.efficiencyValue(v, efficiency: eff)
+    }
+
     var body: some View {
-        Group {
-            if let vehicle = entry.vehicle, let efficiency = vehicle.averageEfficiency {
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "fuelpump.fill")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                        Text("Efficiency")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
+        content
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: family == .accessoryInline ? .center : .leading)
+            .fuelLogWidgetBackground(family)
+    }
 
-                    Spacer(minLength: 0)
+    @ViewBuilder private var content: some View {
+        switch family {
+        case .accessoryInline: inlineView
+        case .accessoryCircular: circularView
+        case .accessoryRectangular: rectangularView
+        default: homeView
+        }
+    }
 
-                    Text(WidgetFormatting.efficiencyValue(vehicle, efficiency: efficiency))
-                        .font(.system(size: 32, weight: .bold, design: .rounded))
-                        .minimumScaleFactor(0.6)
-                        .lineLimit(1)
-
-                    Text(WidgetFormatting.efficiencyUnitLabel(vehicle))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-
-                    Text(vehicle.name)
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                        .lineLimit(1)
-                }
-            } else {
-                VStack(alignment: .leading, spacing: 4) {
+    @ViewBuilder private var homeView: some View {
+        if let vehicle = entry.vehicle, let value = valueText {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 4) {
                     Image(systemName: "fuelpump.fill")
-                        .font(.title2)
+                        .font(.footnote)
                         .foregroundStyle(.secondary)
-                    Text(entry.vehicle == nil ? "Add a vehicle." : "Log two full-tank fill-ups to see efficiency.")
-                        .font(.caption)
+                    Text("Efficiency")
+                        .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
+                        .lineLimit(1)
                 }
+
+                Spacer(minLength: 0)
+
+                Text(value)
+                    .font(.system(size: 32, weight: .bold, design: .rounded))
+                    .minimumScaleFactor(0.6)
+                    .lineLimit(1)
+
+                Text(WidgetFormatting.efficiencyUnitLabel(vehicle))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Text(vehicle.name)
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+            }
+        } else {
+            VStack(alignment: .leading, spacing: 4) {
+                Image(systemName: "fuelpump.fill")
+                    .font(.title2)
+                    .foregroundStyle(.secondary)
+                Text(entry.vehicle == nil ? "Add a vehicle." : "Log two full-tank fill-ups to see efficiency.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder private var inlineView: some View {
+        if let vehicle = entry.vehicle, let value = valueText {
+            Label("\(value) \(WidgetFormatting.efficiencyUnitLabel(vehicle))", systemImage: "fuelpump.fill")
+        } else {
+            Label("No efficiency yet", systemImage: "fuelpump.fill")
+        }
+    }
+
+    @ViewBuilder private var circularView: some View {
+        VStack(spacing: 0) {
+            if let vehicle = entry.vehicle, let value = valueText {
+                Text(value)
+                    .font(.system(size: 22, weight: .bold, design: .rounded))
+                    .minimumScaleFactor(0.5)
+                    .lineLimit(1)
+                Text(WidgetFormatting.efficiencyUnitLabel(vehicle))
+                    .font(.system(size: 9))
+                    .foregroundStyle(.secondary)
+                    .minimumScaleFactor(0.5)
+                    .lineLimit(1)
+            } else {
+                Image(systemName: "fuelpump.fill").font(.title3)
+            }
+        }
+    }
+
+    @ViewBuilder private var rectangularView: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Label("Efficiency", systemImage: "fuelpump.fill")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.secondary)
+            if let vehicle = entry.vehicle, let value = valueText {
+                Text("\(value) \(WidgetFormatting.efficiencyUnitLabel(vehicle))")
+                    .font(.headline)
+                Text(vehicle.name)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            } else {
+                Text("Log two full tanks").font(.caption)
+            }
+        }
     }
 }
 
@@ -84,12 +146,9 @@ struct EfficiencyWidget: Widget {
     var body: some WidgetConfiguration {
         AppIntentConfiguration(kind: Self.kind, intent: VehicleSelectionIntent.self, provider: EfficiencyProvider()) { entry in
             EfficiencyWidgetView(entry: entry)
-                .containerBackground(for: .widget) {
-                    Color(uiColor: .systemBackground)
-                }
         }
         .configurationDisplayName("Efficiency")
         .description("Shows your vehicle's average fuel or electric efficiency.")
-        .supportedFamilies([.systemSmall])
+        .supportedFamilies([.systemSmall, .accessoryInline, .accessoryCircular, .accessoryRectangular])
     }
 }

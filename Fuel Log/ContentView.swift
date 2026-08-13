@@ -105,6 +105,7 @@ struct ContentView: View {
             applyTheme(appTheme)
             injectMockDataIfNeeded()
             WidgetSnapshotUpdater.update(from: modelContext, lastSelectedVehicleID: lastSelectedVehicleID)
+            handlePendingControlAction()
         }
         .onChange(of: appTheme) { _, newTheme in applyTheme(newTheme) }
         .onChange(of: scenePhase) { _, newPhase in
@@ -117,6 +118,7 @@ struct ContentView: View {
                 WidgetSnapshotUpdater.update(from: modelContext, lastSelectedVehicleID: lastSelectedVehicleID)
             } else if newPhase == .active {
                 WidgetSnapshotUpdater.update(from: modelContext, lastSelectedVehicleID: lastSelectedVehicleID)
+                handlePendingControlAction()
             }
         }
         .onChange(of: widgetDataSignature) {
@@ -147,6 +149,19 @@ struct ContentView: View {
         }
     }
     
+    /// Picks up a quick action requested by the Log Fuel control (written to the
+    /// App Group) and routes it through the existing quick-action presentation.
+    private func handlePendingControlAction() {
+        guard let defaults = UserDefaults(suiteName: FuelLogWidgetSnapshot.appGroupIdentifier),
+              let action = defaults.string(forKey: FuelLogWidgetSnapshot.pendingActionKey) else { return }
+        defaults.removeObject(forKey: FuelLogWidgetSnapshot.pendingActionKey)
+        switch action {
+        case "addFuel": quickActionManager.action = .addFuel
+        case "addService": quickActionManager.action = .addService
+        default: break
+        }
+    }
+
     private func applyTheme(_ theme: AppTheme) {
         guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene else { return }
         for window in windowScene.windows {
