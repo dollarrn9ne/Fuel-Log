@@ -13,7 +13,6 @@ struct SettingsView: View {
     @AppStorage("appLockEnabled") private var appLockEnabled: Bool = false
     @AppStorage("liveActivityEnabled") private var liveActivityEnabled: Bool = true
     @Query private var vehicles: [Vehicle]
-    @Query private var shareTokens: [ShareToken]
     @ObservedObject private var syncManager = SyncManager.shared
     
     @State private var selectedEncoding: ExportEncoding = .utf8
@@ -184,15 +183,13 @@ struct SettingsView: View {
                 } message: { Text("Select the app that generated your CSV so it can be formatted correctly.") }
             }
             
-            if shareTokens.contains(where: { $0.isActive }) {
-                Section("Sharing") {
-                    NavigationLink { SharedLinksView() } label: {
-                        Label("Shared Vehicles", systemImage: "person.2.fill")
-                    }
-                    Text("Vehicles you've shared so borrowers can log fuel for them. Revoke a link to stop importing its entries.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+            Section("Sharing") {
+                NavigationLink { SharedLinksView() } label: {
+                    Label("Shared Vehicles", systemImage: "person.2.fill")
                 }
+                Text("Share a vehicle so someone borrowing it can log fuel from the App Clip — their entries sync back to you. Manage or revoke your shared links here.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             Section(header: Text("Danger Zone")) {
