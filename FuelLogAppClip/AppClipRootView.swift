@@ -84,7 +84,7 @@ struct AppClipRootView: View {
     /// the URL names a vehicle we can resolve, jumps straight into logging for it.
     private func handleInvocation(url: URL) {
         // A share-for-logging link carries a token + full vehicle descriptor, so
-        // go straight into the scoped submit form — this works even when the clip
+        // go straight into the scoped submit form; this works even when the clip
         // has no local data (the borrower's store is empty).
         if let descriptor = SharedVehicleDescriptor(url: url) {
             sharedTarget = SharedEntryTarget(descriptor: descriptor)

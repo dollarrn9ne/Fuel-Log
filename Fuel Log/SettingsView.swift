@@ -187,7 +187,7 @@ struct SettingsView: View {
                 NavigationLink { SharedLinksView() } label: {
                     Label("Shared Vehicles", systemImage: "person.2.fill")
                 }
-                Text("Share a vehicle so someone borrowing it can log fuel from the App Clip — their entries sync back to you. Manage or revoke your shared links here.")
+                Text("Share a vehicle so someone borrowing it can log fuel from the App Clip, and their entries sync back to you. Manage or revoke your shared links here.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

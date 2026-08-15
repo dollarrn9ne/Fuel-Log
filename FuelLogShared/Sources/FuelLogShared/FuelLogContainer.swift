@@ -40,7 +40,7 @@ public enum FuelLogContainer {
             }
 
             markWipeAttempted()
-            print("🔄 iCloud is healthy — wiping corrupted local database and retrying...")
+            print("🔄 iCloud is healthy; wiping corrupted local database and retrying...")
             wipeLocalDatabases()
 
             do {

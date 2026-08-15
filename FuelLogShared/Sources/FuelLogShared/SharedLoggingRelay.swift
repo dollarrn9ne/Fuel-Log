@@ -54,7 +54,7 @@ public enum SharedLogging {
 
 /// A self-contained description of the shared vehicle, encoded into the share
 /// link so the App Clip can render its form (labels/units) without reading any
-/// local data — the borrower's clip store is empty.
+/// local data; the borrower's clip store is empty.
 public struct SharedVehicleDescriptor: Sendable, Equatable {
     public var token: UUID
     public var vehicleID: UUID

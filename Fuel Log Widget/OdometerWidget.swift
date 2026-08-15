@@ -68,7 +68,7 @@ struct OdometerWidgetView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Label("Odometer", systemImage: "gauge.open.with.lines.needle.33percent")
                     .font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
-                Text(odoText.map { "\($0) \(unit)" } ?? "—").font(.headline)
+                Text(odoText.map { "\($0) \(unit)" } ?? "-").font(.headline)
                 if let date = entry.vehicle?.lastFillUpDate {
                     Text("Filled \(WidgetFormatting.daysAgoText(date).lowercased())").font(.caption2).foregroundStyle(.secondary)
                 }

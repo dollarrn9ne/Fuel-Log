@@ -177,7 +177,7 @@ struct MaintenanceWidget: Widget {
             MaintenanceWidgetView(entry: entry)
         }
         .configurationDisplayName("Next Maintenance")
-        .description("Shows when your next service is due — whichever comes first: distance or time.")
+        .description("Shows when your next service is due, whichever comes first: distance or time.")
         .supportedFamilies([.systemSmall, .accessoryInline, .accessoryCircular, .accessoryRectangular])
     }
 }

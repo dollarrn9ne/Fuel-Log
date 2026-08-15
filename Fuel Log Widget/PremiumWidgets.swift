@@ -69,7 +69,7 @@ struct LastPriceWidgetView: View {
         case .accessoryRectangular:
             VStack(alignment: .leading, spacing: 2) {
                 Label("Last Price", systemImage: "tag.fill").font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
-                Text(priceText.map { "\($0)\(perUnit)" } ?? "—").font(.headline)
+                Text(priceText.map { "\($0)\(perUnit)" } ?? "-").font(.headline)
                 if let name = entry.vehicle?.name { Text(name).font(.caption2).foregroundStyle(.secondary).lineLimit(1) }
             }
         case .systemMedium:
@@ -105,7 +105,7 @@ struct LastPriceWidgetView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Label("Last Price", systemImage: "tag.fill").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
                     Spacer(minLength: 0)
-                    Text(priceText.map { "\($0)\(perUnit)" } ?? "—").font(.system(size: 26, weight: .bold, design: .rounded)).minimumScaleFactor(0.5).lineLimit(1)
+                    Text(priceText.map { "\($0)\(perUnit)" } ?? "-").font(.system(size: 26, weight: .bold, design: .rounded)).minimumScaleFactor(0.5).lineLimit(1)
                     Text(vehicle.name).font(.caption2).foregroundStyle(.tertiary).lineLimit(1)
                 }
                 Divider()
