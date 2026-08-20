@@ -168,7 +168,7 @@ struct AboutView: View {
             .frame(maxWidth: .infinity)
             .listRowBackground(Color.clear)
             .listRowInsets(EdgeInsets())
-            .padding(.top, 16)
+            .padding(.top, 48)
         }
         .navigationTitle("About Fuel Log")
         .navigationBarTitleDisplayMode(.inline)
