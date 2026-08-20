@@ -48,6 +48,8 @@ public enum EfficiencyConverter {
     /// to interpret older fill-ups that predate per-fill grade tracking, so users
     /// don't have to restate it every time or backfill their history.
     public var defaultGradeRaw: String?
+    /// Free-text name when the default grade is `.other` (e.g. "Race Fuel").
+    public var customGradeLabel: String?
     public var tankCapacity: Double?
     public var batteryCapacity: Double?
 
@@ -212,6 +214,8 @@ public enum EfficiencyConverter {
     /// What went in the tank (E85, Regular, ...). Optional so existing records
     /// migrate without a version bump; nil means "not recorded".
     public var gradeRaw: String?
+    /// Free-text name when the grade is `.other` (e.g. "Race Fuel").
+    public var customGradeLabel: String?
     public var vehicle: Vehicle?
     public var location: GasLocation?
 
@@ -235,6 +239,21 @@ public enum EfficiencyConverter {
         // Charging has no fuel grade.
         guard unit != .kwh else { return nil }
         return fuelGrade ?? vehicle?.defaultFuelGrade
+    }
+
+    /// What to show the user for this fill-up's grade: the custom name when the
+    /// grade is "Other", otherwise the grade itself. Falls back to the vehicle's
+    /// configured label for entries that predate per-fill grade tracking.
+    @Transient public var effectiveGradeName: String? {
+        guard let grade = effectiveGrade else { return nil }
+        guard grade == .other else { return grade.rawValue }
+        let own = customGradeLabel?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let own, !own.isEmpty { return own }
+        // Inherited from the vehicle only when this fill-up has no grade of its own.
+        if fuelGrade == nil, let inherited = vehicle?.customGradeLabel?.trimmingCharacters(in: .whitespacesAndNewlines), !inherited.isEmpty {
+            return inherited
+        }
+        return grade.rawValue
     }
 
     public init(id: UUID = UUID(), date: Date = .now, odometer: Double? = nil, volume: Double, pricePerUnit: Double, isFullTank: Bool = true, notes: String = "", unit: FuelUnit = .gallons, grade: FuelGrade? = nil, vehicle: Vehicle? = nil, location: GasLocation? = nil, receiptData: Data? = nil) {

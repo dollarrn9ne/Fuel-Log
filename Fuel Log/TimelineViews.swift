@@ -103,7 +103,7 @@ struct TimelineRow: View {
             // Surface the grade alongside the row's efficiency figure, so a
             // lower MPG on an E85 tank is self-explanatory. Falls back to the
             // vehicle's usual grade for entries logged before grade tracking.
-            if let grade = f.effectiveGrade { parts.append(grade.rawValue) }
+            if let gradeName = f.effectiveGradeName { parts.append(gradeName) }
         }
         return parts.joined(separator: " • ")
     }
@@ -294,7 +294,7 @@ struct RecordReadOnlyDetailView: View {
                 Section("Log Information") { LabeledContent("Location", value: event.title); LabeledContent("Date", value: event.date.formatted(date: .abbreviated, time: .shortened)); LabeledContent("Cost", value: event.cost.formatted(.currency(code: event.vehicle?.currencyRaw ?? "USD"))); if let odo = event.odometer { LabeledContent("Odometer", value: "\(Int(odo).formatted())") } }
                 switch event {
                 case .fillUp(let f):
-                    Section("Fuel Details") { LabeledContent("Volume", value: "\(f.volume) \(f.unit.rawValue)"); if let grade = f.effectiveGrade { LabeledContent("Fuel Grade", value: grade.rawValue) };LabeledContent("Price per Unit", value: f.pricePerUnit.formatted(.currency(code: event.vehicle?.currencyRaw ?? "USD"))); if f.isFullTank { LabeledContent("Fill Type", value: "Full Tank") } }
+                    Section("Fuel Details") { LabeledContent("Volume", value: "\(f.volume) \(f.unit.rawValue)"); if let gradeName = f.effectiveGradeName { LabeledContent("Fuel Grade", value: gradeName) };LabeledContent("Price per Unit", value: f.pricePerUnit.formatted(.currency(code: event.vehicle?.currencyRaw ?? "USD"))); if f.isFullTank { LabeledContent("Fill Type", value: "Full Tank") } }
                     if !f.notes.isEmpty { Section("Notes") { Text(f.notes).font(.body) } }
                 case .service(let s):
                     Section("Service Details") { LabeledContent("Type", value: s.type.rawValue) }

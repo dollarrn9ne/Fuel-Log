@@ -46,6 +46,7 @@ struct BackupVehicle: Codable {
     var currencyRaw: String
     /// Optional so backups predating vehicle-level fuel grades still decode.
     var defaultGradeRaw: String?
+    var customGradeLabel: String?
     var tankCapacity: Double?
     var batteryCapacity: Double?
     var maintenanceInterval: Double
@@ -70,6 +71,7 @@ struct BackupFillUp: Codable {
     var unitRaw: String
     /// Optional so backups written before fuel grades existed still decode.
     var gradeRaw: String?
+    var customGradeLabel: String?
     var locationID: UUID?
     var receiptData: Data?
 }
@@ -160,7 +162,7 @@ enum FullBackup {
                     id: v.id, name: v.name, make: v.make, model: v.model, year: v.year, photoData: v.photoData,
                     fuelTypeRaw: v.fuelTypeRaw, odometerUnitRaw: v.odometerUnitRaw, fuelUnitRaw: v.fuelUnitRaw,
                     efficiencyUnitRaw: v.efficiencyUnitRaw, currencyRaw: v.currencyRaw,
-                    defaultGradeRaw: v.defaultGradeRaw,
+                    defaultGradeRaw: v.defaultGradeRaw, customGradeLabel: v.customGradeLabel,
                     tankCapacity: v.tankCapacity, batteryCapacity: v.batteryCapacity,
                     maintenanceInterval: v.maintenanceInterval, maintenanceIntervalMonths: v.maintenanceIntervalMonths,
                     purchaseDate: v.purchaseDate, purchasePrice: v.purchasePrice, currentValue: v.currentValue,
@@ -168,6 +170,7 @@ enum FullBackup {
                     fillUps: (v.fillUps ?? []).sorted { $0.date < $1.date }.map { f in
                         BackupFillUp(id: f.id, date: f.date, odometer: f.odometer, volume: f.volume, pricePerUnit: f.pricePerUnit,
                                      isFullTank: f.isFullTank, notes: f.notes, unitRaw: f.unitRaw, gradeRaw: f.gradeRaw,
+                                     customGradeLabel: f.customGradeLabel,
                                      locationID: f.location?.id, receiptData: f.receiptData)
                     },
                     services: (v.services ?? []).sorted { $0.date < $1.date }.map { s in
@@ -227,6 +230,7 @@ enum FullBackup {
             )
             object.photoData = vehicle.photoData
             object.defaultGradeRaw = vehicle.defaultGradeRaw
+            object.customGradeLabel = vehicle.customGradeLabel
             object.maintenanceInterval = vehicle.maintenanceInterval
             object.maintenanceIntervalMonths = vehicle.maintenanceIntervalMonths
             object.purchaseDate = vehicle.purchaseDate
@@ -236,14 +240,16 @@ enum FullBackup {
             context.insert(object)
 
             for fillUp in vehicle.fillUps {
-                context.insert(FillUp(
+                let restoredFillUp = FillUp(
                     id: fillUp.id, date: fillUp.date, odometer: fillUp.odometer, volume: fillUp.volume,
                     pricePerUnit: fillUp.pricePerUnit, isFullTank: fillUp.isFullTank, notes: fillUp.notes,
                     unit: FuelUnit(rawValue: fillUp.unitRaw) ?? .gallons,
                     grade: fillUp.gradeRaw.flatMap { FuelGrade(rawValue: $0) },
                     vehicle: object, location: fillUp.locationID.flatMap { gasLocations[$0] },
                     receiptData: fillUp.receiptData
-                ))
+                )
+                restoredFillUp.customGradeLabel = fillUp.customGradeLabel
+                context.insert(restoredFillUp)
             }
             for service in vehicle.services {
                 context.insert(ServiceRecord(

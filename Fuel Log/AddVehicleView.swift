@@ -51,6 +51,7 @@ struct AddVehicleView: View {
     @State private var yearStr: String = ""
     @State private var fuelType: FuelType = .gas
     @State private var defaultGrade: FuelGrade? = .regular
+    @State private var customGradeLabel: String = ""
     @State private var odometerUnit: OdometerUnit = .miles
     @State private var fuelUnit: FuelUnit = .gallons
     @State private var efficiencyUnit: EfficiencyUnit = .mpgUS
@@ -116,6 +117,9 @@ struct AddVehicleView: View {
                             Text(grade.rawValue).tag(grade as FuelGrade?)
                         }
                     }
+                    if defaultGrade == .other {
+                        FormTextField(title: "Grade Name", placeholder: "e.g. Race Fuel", text: $customGradeLabel)
+                    }
                 }
                 FormTextField(title: "Capacity (\(fuelUnit.rawValue))", placeholder: "e.g., 14.5", text: $tankCapacityStr, keyboardType: .decimalPad)
                 if fuelType == .plugInHybrid {
@@ -136,6 +140,7 @@ struct AddVehicleView: View {
                 if let cap = v.tankCapacity { tankCapacityStr = "\(cap)" }
                 if let cap = v.batteryCapacity { batteryCapacityStr = "\(cap)" }
                 defaultGrade = v.defaultFuelGrade
+                customGradeLabel = v.customGradeLabel ?? ""
                 photoData = v.photoData
             }
         }
@@ -161,6 +166,9 @@ struct AddVehicleView: View {
         guard !finalName.isEmpty else { return }
         let parsedCapacity = Double(tankCapacityStr.replacingOccurrences(of: ",", with: "."))
         let parsedBatteryCapacity = Double(batteryCapacityStr.replacingOccurrences(of: ",", with: "."))
+        // Only meaningful alongside the "Other" grade.
+        let trimmedGradeLabel = customGradeLabel.trimmingCharacters(in: .whitespacesAndNewlines)
+        let finalGradeLabel: String? = (defaultGrade == .other && !trimmedGradeLabel.isEmpty) ? trimmedGradeLabel : nil
         
         let targetVehicle: Vehicle
         
@@ -170,6 +178,7 @@ struct AddVehicleView: View {
             v.tankCapacity = parsedCapacity
             v.batteryCapacity = parsedBatteryCapacity
             v.defaultFuelGrade = defaultGrade
+            v.customGradeLabel = finalGradeLabel
             v.photoData = photoData
             targetVehicle = v
         } else {
@@ -177,6 +186,7 @@ struct AddVehicleView: View {
             newVehicle.maintenanceInterval = Double(maintenanceIntervalStr) ?? 5000.0
             newVehicle.maintenanceIntervalMonths = Double(maintenanceIntervalMonthsStr) ?? 6.0
             newVehicle.defaultFuelGrade = defaultGrade
+            newVehicle.customGradeLabel = finalGradeLabel
             newVehicle.photoData = photoData
             modelContext.insert(newVehicle); modelContext.insert(Trip(name: "Since Day One - \(newVehicle.name)", startDate: .distantPast, endDate: .distantFuture, vehicle: newVehicle))
             targetVehicle = newVehicle

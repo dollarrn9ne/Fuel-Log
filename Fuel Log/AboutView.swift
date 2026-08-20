@@ -63,12 +63,6 @@ struct AboutView: View {
                     Text("No Subscription, Ever.")
                         .fontWeight(.bold)
                         .foregroundStyle(.primary)
-                    
-                    Text("@Motosung, 2026")
-                        .foregroundStyle(.secondary)
-                    
-                    Text(appVersion)
-                        .foregroundStyle(.secondary)
                 }
                 .font(.subheadline)
             }
@@ -164,6 +158,17 @@ struct AboutView: View {
                 }
                 .disabled(storeKit.isPurchasing)
             }
+
+            VStack(spacing: 6) {
+                Text("@Motosung, 2026")
+                Text(appVersion)
+            }
+            .font(.subheadline)
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity)
+            .listRowBackground(Color.clear)
+            .listRowInsets(EdgeInsets())
+            .padding(.top, 16)
         }
         .navigationTitle("About Fuel Log")
         .navigationBarTitleDisplayMode(.inline)

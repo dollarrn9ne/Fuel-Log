@@ -49,6 +49,7 @@ struct AddFillUpView: View {
     @State private var totalCostStr: String = ""
     @State private var isFullTank: Bool = true
     @State private var fuelGrade: FuelGrade?
+    @State private var customGradeLabel: String = ""
     @State private var notes: String = ""
     
     // Receipt Scanning
@@ -207,6 +208,9 @@ struct AddFillUpView: View {
                                 Text(grade.rawValue).tag(grade as FuelGrade?)
                             }
                         }
+                        if fuelGrade == .other {
+                            FormTextField(title: "Grade Name", placeholder: "e.g. Race Fuel", text: $customGradeLabel)
+                        }
                     }
                     Toggle("Full Tank", isOn: $isFullTank)
                 }
@@ -256,6 +260,7 @@ struct AddFillUpView: View {
                 totalCostStr = String(format: "%.2f", f.volume * f.pricePerUnit)
                 isFullTank = f.isFullTank
                 fuelGrade = f.fuelGrade
+                customGradeLabel = f.customGradeLabel ?? ""
                 notes = f.notes
                 if let rData = f.receiptData { scannedImage = UIImage(data: rData) }
             } else {
@@ -270,6 +275,7 @@ struct AddFillUpView: View {
                         .compactMap(\.fuelGrade)
                         .first
                     ?? vehicle.fuelType.defaultGrade
+                if fuelGrade == .other { customGradeLabel = vehicle.customGradeLabel ?? "" }
                 foreignUnit = vehicle.fuelUnit == .gallons ? .liters : .gallons
                 foreignCurrency = vehicle.currency == .usd ? .cad : .usd
                 exchangeRateStr = "\(lastExchangeRate)"
@@ -457,14 +463,18 @@ struct AddFillUpView: View {
         
         // Charging has no fuel grade.
         let finalGrade: FuelGrade? = isChargeMode ? nil : fuelGrade
+        let trimmedGradeLabel = customGradeLabel.trimmingCharacters(in: .whitespacesAndNewlines)
+        let finalGradeLabel: String? = (finalGrade == .other && !trimmedGradeLabel.isEmpty) ? trimmedGradeLabel : nil
 
         if let f = editingFillUp {
             f.date = date; f.odometer = odo; f.volume = finalVol; f.pricePerUnit = finalPPU; f.isFullTank = isChargeMode ? true : isFullTank; f.notes = finalNotes; f.receiptData = finalReceiptData
             f.fuelGrade = finalGrade
+            f.customGradeLabel = finalGradeLabel
             if let existingLoc = f.location { existingLoc.name = finalLocationName; existingLoc.latitude = latitude; existingLoc.longitude = longitude } else { f.location = resolveLocation(named: finalLocationName, latitude: latitude, longitude: longitude) }
         } else {
             let newLoc = resolveLocation(named: finalLocationName, latitude: latitude, longitude: longitude)
             let newFillUp = FillUp(date: date, odometer: odo, volume: finalVol, pricePerUnit: finalPPU, isFullTank: isChargeMode ? true : isFullTank, notes: finalNotes, unit: isChargeMode ? .kwh : vehicle.fuelUnit, grade: finalGrade, vehicle: vehicle, location: newLoc, receiptData: finalReceiptData)
+            newFillUp.customGradeLabel = finalGradeLabel
             modelContext.insert(newFillUp)
             if vehicle.fillUps == nil { vehicle.fillUps = [] }
             vehicle.fillUps?.append(newFillUp)
