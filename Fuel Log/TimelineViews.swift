@@ -96,14 +96,15 @@ struct TimelineRow: View {
     
     var dateAndTypeText: String {
         var parts = [event.date.formatted(date: .abbreviated, time: .omitted)]
-        if case .service(let s) = event { parts.append(s.type.rawValue) }
+        switch event {
+        case .service(let s):
+            parts.append(s.type.rawValue)
+        case .fillUp(let f):
+            // Surface the grade alongside the row's efficiency figure, so a
+            // lower MPG on an E85 tank is self-explanatory.
+            if let grade = f.fuelGrade { parts.append(grade.rawValue) }
+        }
         return parts.joined(separator: " • ")
-    }
-
-    /// The grade of a fuel fill-up, when recorded.
-    private var fuelGrade: FuelGrade? {
-        if case .fillUp(let f) = event { return f.fuelGrade }
-        return nil
     }
     
     var tripDistanceText: String? {
@@ -156,23 +157,11 @@ struct TimelineRow: View {
                         .foregroundStyle(.primary)
                         .fixedSize(horizontal: false, vertical: true)
                     
-                    HStack(spacing: 6) {
-                        Text(dateAndTypeText)
-                            .font(.body.weight(.medium))
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-
-                        if let grade = fuelGrade {
-                            Text(grade.rawValue)
-                                .font(.caption2.weight(.bold))
-                                .foregroundStyle(grade.color)
-                                .padding(.horizontal, 7)
-                                .padding(.vertical, 3)
-                                .background(grade.color.opacity(0.18), in: Capsule())
-                                .fixedSize()
-                        }
-                    }
-
+                    Text(dateAndTypeText)
+                        .font(.body.weight(.medium))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    
                     if let odo = event.odometer {
                         Text("\(Int(odo).formatted()) \(distanceUnit)")
                             .font(.body.weight(.medium))
