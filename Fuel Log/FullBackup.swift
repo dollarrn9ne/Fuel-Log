@@ -44,6 +44,8 @@ struct BackupVehicle: Codable {
     var fuelUnitRaw: String
     var efficiencyUnitRaw: String
     var currencyRaw: String
+    /// Optional so backups predating vehicle-level fuel grades still decode.
+    var defaultGradeRaw: String?
     var tankCapacity: Double?
     var batteryCapacity: Double?
     var maintenanceInterval: Double
@@ -158,6 +160,7 @@ enum FullBackup {
                     id: v.id, name: v.name, make: v.make, model: v.model, year: v.year, photoData: v.photoData,
                     fuelTypeRaw: v.fuelTypeRaw, odometerUnitRaw: v.odometerUnitRaw, fuelUnitRaw: v.fuelUnitRaw,
                     efficiencyUnitRaw: v.efficiencyUnitRaw, currencyRaw: v.currencyRaw,
+                    defaultGradeRaw: v.defaultGradeRaw,
                     tankCapacity: v.tankCapacity, batteryCapacity: v.batteryCapacity,
                     maintenanceInterval: v.maintenanceInterval, maintenanceIntervalMonths: v.maintenanceIntervalMonths,
                     purchaseDate: v.purchaseDate, purchasePrice: v.purchasePrice, currentValue: v.currentValue,
@@ -223,6 +226,7 @@ enum FullBackup {
                 tankCapacity: vehicle.tankCapacity, batteryCapacity: vehicle.batteryCapacity
             )
             object.photoData = vehicle.photoData
+            object.defaultGradeRaw = vehicle.defaultGradeRaw
             object.maintenanceInterval = vehicle.maintenanceInterval
             object.maintenanceIntervalMonths = vehicle.maintenanceIntervalMonths
             object.purchaseDate = vehicle.purchaseDate

@@ -262,12 +262,14 @@ struct AddFillUpView: View {
                 if let lastOdo = vehicle.lastOdometer {
                     odometerStr = lastOdo.odometerString
                 }
-                // Preselect the grade this vehicle most recently used, falling
-                // back to the default for its fuel type.
-                fuelGrade = (vehicle.fillUps ?? [])
-                    .sorted { $0.date > $1.date }
-                    .compactMap(\.fuelGrade)
-                    .first ?? vehicle.fuelType.defaultGrade
+                // Preselect the vehicle's configured grade; for flex-fuel (which
+                // has no configured default) fall back to the last grade used.
+                fuelGrade = vehicle.defaultGradeRaw.flatMap { FuelGrade(rawValue: $0) }
+                    ?? (vehicle.fillUps ?? [])
+                        .sorted { $0.date > $1.date }
+                        .compactMap(\.fuelGrade)
+                        .first
+                    ?? vehicle.fuelType.defaultGrade
                 foreignUnit = vehicle.fuelUnit == .gallons ? .liters : .gallons
                 foreignCurrency = vehicle.currency == .usd ? .cad : .usd
                 exchangeRateStr = "\(lastExchangeRate)"

@@ -142,7 +142,7 @@ struct MonthlyReportView: View {
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(fillUp.location?.name.isEmpty == false ? fillUp.location!.name : "Fuel Station")
                                         .font(.headline.weight(.bold))
-                                    Text([fillUp.date.formatted(date: .abbreviated, time: .omitted), fillUp.fuelGrade?.rawValue]
+                                    Text([fillUp.date.formatted(date: .abbreviated, time: .omitted), fillUp.effectiveGrade?.rawValue]
                                         .compactMap { $0 }
                                         .joined(separator: " • "))
                                         .font(.caption)

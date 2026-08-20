@@ -44,6 +44,10 @@ public enum EfficiencyConverter {
     public var fuelUnitRaw: String = FuelUnit.gallons.rawValue
     public var efficiencyUnitRaw: String = EfficiencyUnit.mpgUS.rawValue
     public var currencyRaw: String = Currency.usd.rawValue
+    /// The grade this vehicle normally takes. Used to preselect new fill-ups and
+    /// to interpret older fill-ups that predate per-fill grade tracking, so users
+    /// don't have to restate it every time or backfill their history.
+    public var defaultGradeRaw: String?
     public var tankCapacity: Double?
     public var batteryCapacity: Double?
 
@@ -85,6 +89,13 @@ public enum EfficiencyConverter {
         set { currencyRaw = newValue.rawValue }
     }
 
+    /// The vehicle's usual grade. Falls back to the one implied by its fuel type
+    /// (diesel cars take diesel), so single-fuel vehicles need no configuration.
+    @Transient public var defaultFuelGrade: FuelGrade? {
+        get { defaultGradeRaw.flatMap { FuelGrade(rawValue: $0) } ?? fuelType.defaultGrade }
+        set { defaultGradeRaw = newValue?.rawValue }
+    }
+
     public init(id: UUID = UUID(), name: String, make: String = "", model: String = "", year: Int? = nil, fuelType: FuelType = .gas, odometerUnit: OdometerUnit = .miles, fuelUnit: FuelUnit = .gallons, efficiencyUnit: EfficiencyUnit = .mpgUS, currency: Currency = .usd, tankCapacity: Double? = nil, batteryCapacity: Double? = nil) {
         self.id = id; self.name = name; self.make = make; self.model = model; self.year = year
         self.fuelTypeRaw = fuelType.rawValue
@@ -122,7 +133,7 @@ public enum EfficiencyConverter {
             if (fill.unit == .kwh) != electricEfficiency { continue }
             guard let odo = fill.odometer else { continue }
             volumeSinceLastFull += fill.volume
-            if let grade, fill.fuelGrade != grade { segmentMatchesGrade = false }
+            if let grade, (fill.fuelGrade ?? defaultFuelGrade) != grade { segmentMatchesGrade = false }
             if fill.isFullTank {
                 if let prevOdo = lastFullOdo, odo > prevOdo, segmentMatchesGrade {
                     dist += (odo - prevOdo)
@@ -140,7 +151,7 @@ public enum EfficiencyConverter {
     /// Average efficiency per fuel grade, for grades that have enough data to
     /// produce a figure. Ordered by `FuelGrade`'s declaration order.
     @Transient public var efficiencyByGrade: [(grade: FuelGrade, efficiency: Double)] {
-        let usedGrades = Set((fillUps ?? []).compactMap(\.fuelGrade))
+        let usedGrades = Set((fillUps ?? []).compactMap { $0.fuelGrade ?? defaultFuelGrade })
         guard usedGrades.count > 1 else { return [] }
         return FuelGrade.allCases.compactMap { grade in
             guard usedGrades.contains(grade), let value = averageEfficiency(forGrade: grade) else { return nil }
@@ -150,7 +161,7 @@ public enum EfficiencyConverter {
 
     /// Average price paid per unit for a grade, for cost-per-distance comparisons.
     public func averagePrice(forGrade grade: FuelGrade) -> Double? {
-        let matching = (fillUps ?? []).filter { $0.fuelGrade == grade && $0.volume > 0 }
+        let matching = (fillUps ?? []).filter { ($0.fuelGrade ?? defaultFuelGrade) == grade && $0.volume > 0 }
         guard !matching.isEmpty else { return nil }
         let volume = matching.map(\.volume).reduce(0, +)
         guard volume > 0 else { return nil }
@@ -214,6 +225,16 @@ public enum EfficiencyConverter {
     @Transient public var fuelGrade: FuelGrade? {
         get { gradeRaw.flatMap { FuelGrade(rawValue: $0) } }
         set { gradeRaw = newValue?.rawValue }
+    }
+
+    /// The grade to treat this fill-up as: what was recorded, otherwise the
+    /// vehicle's usual grade. This lets fill-ups logged before grade tracking
+    /// existed count toward the right grade without rewriting stored data, and
+    /// keeps following the vehicle if its default is changed later.
+    @Transient public var effectiveGrade: FuelGrade? {
+        // Charging has no fuel grade.
+        guard unit != .kwh else { return nil }
+        return fuelGrade ?? vehicle?.defaultFuelGrade
     }
 
     public init(id: UUID = UUID(), date: Date = .now, odometer: Double? = nil, volume: Double, pricePerUnit: Double, isFullTank: Bool = true, notes: String = "", unit: FuelUnit = .gallons, grade: FuelGrade? = nil, vehicle: Vehicle? = nil, location: GasLocation? = nil, receiptData: Data? = nil) {

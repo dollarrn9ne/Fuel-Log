@@ -50,6 +50,7 @@ struct AddVehicleView: View {
     @State private var model: String = ""
     @State private var yearStr: String = ""
     @State private var fuelType: FuelType = .gas
+    @State private var defaultGrade: FuelGrade? = .regular
     @State private var odometerUnit: OdometerUnit = .miles
     @State private var fuelUnit: FuelUnit = .gallons
     @State private var efficiencyUnit: EfficiencyUnit = .mpgUS
@@ -106,6 +107,16 @@ struct AddVehicleView: View {
                 Picker("Currency", selection: $currency) { ForEach(Currency.allCases) { c in Text(c.rawValue).tag(c) } }
                 Picker("Distance", selection: $odometerUnit) { ForEach(OdometerUnit.allCases) { u in Text(u.rawValue).tag(u) } }
                 Picker("Fuel / Energy", selection: $fuelUnit) { ForEach(FuelUnit.allCases) { u in Text(u.rawValue).tag(u) } }
+                // Vehicles that always take the same fuel set it once here
+                // instead of on every fill-up. Flex-fuel is excluded on purpose:
+                // choosing per fill-up is the whole point for those.
+                if fuelType == .gas || fuelType == .plugInHybrid {
+                    Picker("Fuel Grade", selection: $defaultGrade) {
+                        ForEach(fuelType.availableGrades) { grade in
+                            Text(grade.rawValue).tag(grade as FuelGrade?)
+                        }
+                    }
+                }
                 FormTextField(title: "Capacity (\(fuelUnit.rawValue))", placeholder: "e.g., 14.5", text: $tankCapacityStr, keyboardType: .decimalPad)
                 if fuelType == .plugInHybrid {
                     FormTextField(title: "Capacity (kWh)", placeholder: "e.g., 8.8", text: $batteryCapacityStr, keyboardType: .decimalPad)
@@ -124,6 +135,7 @@ struct AddVehicleView: View {
                 fuelType = v.fuelType; odometerUnit = v.odometerUnit; fuelUnit = v.fuelUnit; efficiencyUnit = v.efficiencyUnit; currency = v.currency; maintenanceIntervalStr = "\(Int(v.maintenanceInterval))"; maintenanceIntervalMonthsStr = "\(Int(v.maintenanceIntervalMonths))"
                 if let cap = v.tankCapacity { tankCapacityStr = "\(cap)" }
                 if let cap = v.batteryCapacity { batteryCapacityStr = "\(cap)" }
+                defaultGrade = v.defaultFuelGrade
                 photoData = v.photoData
             }
         }
@@ -134,6 +146,12 @@ struct AddVehicleView: View {
             } else if fuelUnit == .kwh {
                 fuelUnit = .gallons
                 efficiencyUnit = odometerUnit == .miles ? .mpgUS : .l100km
+            }
+            // Keep the grade valid for the newly chosen fuel type.
+            if let grade = defaultGrade, !newType.availableGrades.contains(grade) {
+                defaultGrade = newType.defaultGrade
+            } else if defaultGrade == nil {
+                defaultGrade = newType.defaultGrade
             }
         }
     }
@@ -151,12 +169,14 @@ struct AddVehicleView: View {
             v.maintenanceIntervalMonths = Double(maintenanceIntervalMonthsStr) ?? 6.0
             v.tankCapacity = parsedCapacity
             v.batteryCapacity = parsedBatteryCapacity
+            v.defaultFuelGrade = defaultGrade
             v.photoData = photoData
             targetVehicle = v
         } else {
             let newVehicle = Vehicle(name: finalName, make: make, model: model, year: Int(yearStr), fuelType: fuelType, odometerUnit: odometerUnit, fuelUnit: fuelUnit, efficiencyUnit: efficiencyUnit, currency: currency, tankCapacity: parsedCapacity, batteryCapacity: parsedBatteryCapacity)
             newVehicle.maintenanceInterval = Double(maintenanceIntervalStr) ?? 5000.0
             newVehicle.maintenanceIntervalMonths = Double(maintenanceIntervalMonthsStr) ?? 6.0
+            newVehicle.defaultFuelGrade = defaultGrade
             newVehicle.photoData = photoData
             modelContext.insert(newVehicle); modelContext.insert(Trip(name: "Since Day One - \(newVehicle.name)", startDate: .distantPast, endDate: .distantFuture, vehicle: newVehicle))
             targetVehicle = newVehicle
