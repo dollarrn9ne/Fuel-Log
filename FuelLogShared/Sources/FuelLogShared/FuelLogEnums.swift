@@ -63,6 +63,19 @@ public enum FuelGrade: String, Codable, CaseIterable, Identifiable {
     case diesel = "Diesel"
     case other = "Other"
     public var id: String { rawValue }
+
+    /// Chip colour. Green stays reserved for diesel to match the fuel pill and
+    /// timeline icon elsewhere in the app, so E85 uses yellow (ethanol) instead.
+    public var color: Color {
+        switch self {
+        case .regular: return .blue
+        case .midgrade: return .teal
+        case .premium: return .purple
+        case .e85: return .yellow
+        case .diesel: return .green
+        case .other: return .gray
+        }
+    }
 }
 
 public enum FuelUnit: String, Codable, CaseIterable, Identifiable {
