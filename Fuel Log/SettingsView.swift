@@ -321,7 +321,9 @@ struct SettingsView: View {
         isExporting = true; exportProgress = 0.0; exportFilename = targetVehicle != nil ? "\(targetVehicle!.name)_Logs" : "All_Vehicles_Logs"
         try? await Task.sleep(nanoseconds: 100_000_000)
         
-        var csvString = "Vehicle,Record Type,Date,Odometer,Cost,Details,Location,Notes\n"
+        // "Fuel Grade" is appended as a trailing column so older importers that
+        // read only the first eight fields keep working.
+        var csvString = "Vehicle,Record Type,Date,Odometer,Cost,Details,Location,Notes,Fuel Grade\n"
         let df = DateFormatter(); df.dateStyle = .short; df.timeStyle = .short
         let vehiclesToExport = targetVehicle == nil ? vehicles : [targetVehicle!]
         let totalEvents = vehiclesToExport.reduce(0) { $0 + ($1.fillUps ?? []).count + ($1.services ?? []).count }
@@ -329,11 +331,11 @@ struct SettingsView: View {
         
         for vehicle in vehiclesToExport {
             for f in (vehicle.fillUps ?? []) {
-                csvString.append("\"\(vehicle.name)\",\"Fuel\",\"\(df.string(from: f.date))\",\"\(f.odometer?.odometerString ?? "")\",\"\(f.totalCost)\",\"\(f.volume) \(f.unit.rawValue)\",\"\(f.location?.name.replacingOccurrences(of: "\"", with: "\"\"") ?? "")\",\"\(f.notes.replacingOccurrences(of: "\"", with: "\"\""))\"\n")
+                csvString.append("\"\(vehicle.name)\",\"Fuel\",\"\(df.string(from: f.date))\",\"\(f.odometer?.odometerString ?? "")\",\"\(f.totalCost)\",\"\(f.volume) \(f.unit.rawValue)\",\"\(f.location?.name.replacingOccurrences(of: "\"", with: "\"\"") ?? "")\",\"\(f.notes.replacingOccurrences(of: "\"", with: "\"\""))\",\"\(f.fuelGrade?.rawValue ?? "")\"\n")
                 currentCount += 1; if Int(currentCount) % 20 == 0 { exportProgress = currentCount / totalDouble; try? await Task.sleep(nanoseconds: 10_000_000) }
             }
             for s in (vehicle.services ?? []) {
-                csvString.append("\"\(vehicle.name)\",\"Service\",\"\(df.string(from: s.date))\",\"\(s.odometer.odometerString)\",\"\(s.cost)\",\"\(s.type.rawValue)\",\"\(s.location?.name.replacingOccurrences(of: "\"", with: "\"\"") ?? "")\",\"\(s.notes.replacingOccurrences(of: "\"", with: "\"\""))\"\n")
+                csvString.append("\"\(vehicle.name)\",\"Service\",\"\(df.string(from: s.date))\",\"\(s.odometer.odometerString)\",\"\(s.cost)\",\"\(s.type.rawValue)\",\"\(s.location?.name.replacingOccurrences(of: "\"", with: "\"\"") ?? "")\",\"\(s.notes.replacingOccurrences(of: "\"", with: "\"\""))\",\"\"\n")
                 currentCount += 1; if Int(currentCount) % 20 == 0 { exportProgress = currentCount / totalDouble; try? await Task.sleep(nanoseconds: 10_000_000) }
             }
         }

@@ -98,10 +98,12 @@ class CSVImporter: ObservableObject {
                 let vol = components.first.flatMap { Double($0) } ?? 0
                 let unit = FuelUnit(rawValue: components.dropFirst().joined(separator: " ")) ?? .gallons
                 let pricePerUnit = vol > 0 ? (cost / vol) : 0
-                
+                // Fuel Grade is an optional trailing column added later.
+                let grade = row.count > 8 ? FuelGrade(rawValue: row[8]) : nil
+
                 if !(vehicle.fillUps ?? []).contains(where: { abs($0.date.timeIntervalSince(date)) < 60 && $0.volume == vol }) {
                     if let loc { modelContext.insert(loc) }
-                    modelContext.insert(FillUp(date: date, odometer: odo, volume: vol, pricePerUnit: pricePerUnit, isFullTank: true, notes: notesStr, unit: unit, vehicle: vehicle, location: loc))
+                    modelContext.insert(FillUp(date: date, odometer: odo, volume: vol, pricePerUnit: pricePerUnit, isFullTank: true, notes: notesStr, unit: unit, grade: grade, vehicle: vehicle, location: loc))
                 }
             } else if recordType == "Service" {
                 let type = ServiceType(rawValue: detailsStr) ?? .general

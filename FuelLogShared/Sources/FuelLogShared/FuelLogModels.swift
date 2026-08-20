@@ -96,7 +96,16 @@ public enum EfficiencyConverter {
         self.batteryCapacity = batteryCapacity
     }
 
-    @Transient public var averageEfficiency: Double? {
+    @Transient public var averageEfficiency: Double? { averageEfficiency(forGrade: nil) }
+
+    /// Average efficiency in the vehicle's chosen unit. Pass a `grade` to measure
+    /// only the tanks filled with that fuel, so (for example) a flex-fuel driver
+    /// can compare E85 against gasoline instead of averaging them together.
+    ///
+    /// A segment counts toward the requested grade only when the fuel added since
+    /// the previous full tank was all of that grade; mixed segments are skipped
+    /// because the distance can't be attributed to one fuel.
+    public func averageEfficiency(forGrade grade: FuelGrade?) -> Double? {
         let sorted = (fillUps ?? []).sorted { $0.date < $1.date }
         guard sorted.count >= 2 else { return nil }
         let electricEfficiency = efficiencyUnit == .miPerKWh || efficiencyUnit == .kmPerKWh
@@ -107,22 +116,45 @@ public enum EfficiencyConverter {
         // (including the closing full tank, excluding the opening one).
         var lastFullOdo: Double? = nil
         var volumeSinceLastFull: Double = 0
+        var segmentMatchesGrade = true
         for fill in sorted {
             // Only mix fill-ups whose energy type matches the efficiency unit.
             if (fill.unit == .kwh) != electricEfficiency { continue }
             guard let odo = fill.odometer else { continue }
             volumeSinceLastFull += fill.volume
+            if let grade, fill.fuelGrade != grade { segmentMatchesGrade = false }
             if fill.isFullTank {
-                if let prevOdo = lastFullOdo, odo > prevOdo {
+                if let prevOdo = lastFullOdo, odo > prevOdo, segmentMatchesGrade {
                     dist += (odo - prevOdo)
                     vol += volumeSinceLastFull
                 }
                 lastFullOdo = odo
                 volumeSinceLastFull = 0
+                segmentMatchesGrade = true
             }
         }
         guard vol > 0, dist > 0 else { return nil }
         return EfficiencyConverter.convert(distance: dist, odometerUnit: odometerUnit, volume: vol, fuelUnit: fuelUnit, to: efficiencyUnit)
+    }
+
+    /// Average efficiency per fuel grade, for grades that have enough data to
+    /// produce a figure. Ordered by `FuelGrade`'s declaration order.
+    @Transient public var efficiencyByGrade: [(grade: FuelGrade, efficiency: Double)] {
+        let usedGrades = Set((fillUps ?? []).compactMap(\.fuelGrade))
+        guard usedGrades.count > 1 else { return [] }
+        return FuelGrade.allCases.compactMap { grade in
+            guard usedGrades.contains(grade), let value = averageEfficiency(forGrade: grade) else { return nil }
+            return (grade, value)
+        }
+    }
+
+    /// Average price paid per unit for a grade, for cost-per-distance comparisons.
+    public func averagePrice(forGrade grade: FuelGrade) -> Double? {
+        let matching = (fillUps ?? []).filter { $0.fuelGrade == grade && $0.volume > 0 }
+        guard !matching.isEmpty else { return nil }
+        let volume = matching.map(\.volume).reduce(0, +)
+        guard volume > 0 else { return nil }
+        return matching.map(\.totalCost).reduce(0, +) / volume
     }
 
     @Transient public var totalCost: Double { totalFuelCost + totalServiceCost }
@@ -166,6 +198,9 @@ public enum EfficiencyConverter {
     public var isFullTank: Bool = true
     public var notes: String = ""
     public var unitRaw: String = FuelUnit.gallons.rawValue
+    /// What went in the tank (E85, Regular, ...). Optional so existing records
+    /// migrate without a version bump; nil means "not recorded".
+    public var gradeRaw: String?
     public var vehicle: Vehicle?
     public var location: GasLocation?
 
@@ -176,9 +211,15 @@ public enum EfficiencyConverter {
         set { unitRaw = newValue.rawValue }
     }
 
-    public init(id: UUID = UUID(), date: Date = .now, odometer: Double? = nil, volume: Double, pricePerUnit: Double, isFullTank: Bool = true, notes: String = "", unit: FuelUnit = .gallons, vehicle: Vehicle? = nil, location: GasLocation? = nil, receiptData: Data? = nil) {
+    @Transient public var fuelGrade: FuelGrade? {
+        get { gradeRaw.flatMap { FuelGrade(rawValue: $0) } }
+        set { gradeRaw = newValue?.rawValue }
+    }
+
+    public init(id: UUID = UUID(), date: Date = .now, odometer: Double? = nil, volume: Double, pricePerUnit: Double, isFullTank: Bool = true, notes: String = "", unit: FuelUnit = .gallons, grade: FuelGrade? = nil, vehicle: Vehicle? = nil, location: GasLocation? = nil, receiptData: Data? = nil) {
         self.id = id; self.date = date; self.odometer = odometer; self.volume = volume; self.pricePerUnit = pricePerUnit; self.isFullTank = isFullTank; self.notes = notes
         self.unitRaw = unit.rawValue
+        self.gradeRaw = grade?.rawValue
         self.vehicle = vehicle; self.location = location; self.receiptData = receiptData
     }
     @Transient public var totalCost: Double { volume * pricePerUnit }

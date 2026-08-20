@@ -66,6 +66,8 @@ struct BackupFillUp: Codable {
     var isFullTank: Bool
     var notes: String
     var unitRaw: String
+    /// Optional so backups written before fuel grades existed still decode.
+    var gradeRaw: String?
     var locationID: UUID?
     var receiptData: Data?
 }
@@ -162,7 +164,7 @@ enum FullBackup {
                     isArchived: v.isArchived,
                     fillUps: (v.fillUps ?? []).sorted { $0.date < $1.date }.map { f in
                         BackupFillUp(id: f.id, date: f.date, odometer: f.odometer, volume: f.volume, pricePerUnit: f.pricePerUnit,
-                                     isFullTank: f.isFullTank, notes: f.notes, unitRaw: f.unitRaw,
+                                     isFullTank: f.isFullTank, notes: f.notes, unitRaw: f.unitRaw, gradeRaw: f.gradeRaw,
                                      locationID: f.location?.id, receiptData: f.receiptData)
                     },
                     services: (v.services ?? []).sorted { $0.date < $1.date }.map { s in
@@ -234,6 +236,7 @@ enum FullBackup {
                     id: fillUp.id, date: fillUp.date, odometer: fillUp.odometer, volume: fillUp.volume,
                     pricePerUnit: fillUp.pricePerUnit, isFullTank: fillUp.isFullTank, notes: fillUp.notes,
                     unit: FuelUnit(rawValue: fillUp.unitRaw) ?? .gallons,
+                    grade: fillUp.gradeRaw.flatMap { FuelGrade(rawValue: $0) },
                     vehicle: object, location: fillUp.locationID.flatMap { gasLocations[$0] },
                     receiptData: fillUp.receiptData
                 ))

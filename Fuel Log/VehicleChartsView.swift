@@ -285,7 +285,9 @@ struct VehicleChartsView: View {
                         .padding()
                         .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
                         .padding(.horizontal)
-                        
+
+                        gradeComparisonCard
+
                     } else {
                         ContentUnavailableView("Not Enough Data", systemImage: "chart.xyaxis.line", description: Text("Log at least two fill-ups in this timeframe to see your charts."))
                     }
@@ -307,6 +309,67 @@ struct VehicleChartsView: View {
         }
     }
     
+    /// Compares efficiency across the fuel grades this vehicle has actually used
+    /// (e.g. E85 vs Regular). Only shown when more than one grade is recorded,
+    /// since that's the case where a single blended average is misleading.
+    ///
+    /// Cost per distance is the figure that actually settles whether a cheaper
+    /// but less efficient fuel is worth it.
+    @ViewBuilder private var gradeComparisonCard: some View {
+        let comparison = vehicle.efficiencyByGrade
+        if comparison.count > 1 {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("BY FUEL GRADE")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.secondary)
+
+                ForEach(comparison, id: \.grade) { entry in
+                    HStack(alignment: .firstTextBaseline) {
+                        Text(entry.grade.rawValue)
+                            .font(.subheadline.weight(.bold))
+                            .frame(minWidth: 70, alignment: .leading)
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("\(String(format: "%.1f", entry.efficiency)) \(vehicle.efficiencyUnit.rawValue)")
+                                .font(.subheadline.weight(.medium))
+                                .monospacedDigit()
+                            if let costPer = costPerDistance(for: entry) {
+                                Text(costPer)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .monospacedDigit()
+                            }
+                        }
+                        Spacer()
+                    }
+                }
+
+                Text("Efficiency is measured only from tanks filled with a single grade, so mixed tanks are excluded.")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+            .padding()
+            .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
+            .padding(.horizontal)
+        }
+    }
+
+    /// Average fuel cost per unit of distance for a grade, e.g. "$0.15/mi".
+    private func costPerDistance(for entry: (grade: FuelGrade, efficiency: Double)) -> String? {
+        guard let price = vehicle.averagePrice(forGrade: entry.grade), price > 0, entry.efficiency > 0 else { return nil }
+        // For L/100 km, efficiency is consumption (volume per distance) rather
+        // than distance per volume, so the cost math inverts.
+        let perDistance: Double
+        switch vehicle.efficiencyUnit {
+        case .l100km:
+            perDistance = price * entry.efficiency / 100
+        default:
+            perDistance = price / entry.efficiency
+        }
+        let distanceSuffix = vehicle.odometerUnit == .miles ? "mi" : "km"
+        return perDistance.formatted(.currency(code: vehicle.currencyRaw).precision(.fractionLength(3))) + "/\(distanceSuffix)"
+    }
+
     @ViewBuilder
     private func syncableChart<C: View>(_ chart: C) -> some View {
         if #available(iOS 17.0, *) {

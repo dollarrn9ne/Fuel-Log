@@ -25,8 +25,43 @@ public enum AppTheme: String, Codable, CaseIterable, Identifiable {
 public enum FuelType: String, Codable, CaseIterable, Identifiable {
     case gas = "Gasoline"
     case diesel = "Diesel"
+    case flexFuel = "Flex-Fuel (E85)"
     case plugInHybrid = "Plug-In Hybrid (PHEV)"
     case electric = "Electric (EV)"
+    public var id: String { rawValue }
+
+    /// Grades that make sense to offer for this vehicle at the pump.
+    public var availableGrades: [FuelGrade] {
+        switch self {
+        case .gas, .plugInHybrid: return [.regular, .midgrade, .premium, .other]
+        case .flexFuel: return [.e85, .regular, .midgrade, .premium, .other]
+        case .diesel: return [.diesel, .other]
+        case .electric: return []
+        }
+    }
+
+    /// The grade preselected for a new fill-up.
+    public var defaultGrade: FuelGrade? {
+        switch self {
+        case .gas, .plugInHybrid: return .regular
+        case .flexFuel: return .e85
+        case .diesel: return .diesel
+        case .electric: return nil
+        }
+    }
+}
+
+/// What was actually put in the tank on a given fill-up. Tracked per fill-up
+/// because flex-fuel drivers alternate between E85 and gasoline, and the two
+/// have materially different energy content (E85 yields noticeably lower MPG),
+/// so blending them into one average misrepresents both.
+public enum FuelGrade: String, Codable, CaseIterable, Identifiable {
+    case regular = "Regular"
+    case midgrade = "Midgrade"
+    case premium = "Premium"
+    case e85 = "E85"
+    case diesel = "Diesel"
+    case other = "Other"
     public var id: String { rawValue }
 }
 

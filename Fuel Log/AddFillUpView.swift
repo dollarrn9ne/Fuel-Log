@@ -48,6 +48,7 @@ struct AddFillUpView: View {
     @State private var pricePerUnitStr: String = ""
     @State private var totalCostStr: String = ""
     @State private var isFullTank: Bool = true
+    @State private var fuelGrade: FuelGrade?
     @State private var notes: String = ""
     
     // Receipt Scanning
@@ -198,6 +199,15 @@ struct AddFillUpView: View {
                     .onChange(of: totalCostStr) { _, _ in if focusedField == .totalCost { fieldEdited(.totalCost) } }
                 
                 if !isChargeMode {
+                    let grades = vehicle.fuelType.availableGrades
+                    if !grades.isEmpty {
+                        Picker("Fuel Grade", selection: $fuelGrade) {
+                            Text("Not Recorded").tag(nil as FuelGrade?)
+                            ForEach(grades) { grade in
+                                Text(grade.rawValue).tag(grade as FuelGrade?)
+                            }
+                        }
+                    }
                     Toggle("Full Tank", isOn: $isFullTank)
                 }
             }
@@ -245,12 +255,19 @@ struct AddFillUpView: View {
                 pricePerUnitStr = "\(f.pricePerUnit)"
                 totalCostStr = String(format: "%.2f", f.volume * f.pricePerUnit)
                 isFullTank = f.isFullTank
+                fuelGrade = f.fuelGrade
                 notes = f.notes
                 if let rData = f.receiptData { scannedImage = UIImage(data: rData) }
             } else {
                 if let lastOdo = vehicle.lastOdometer {
                     odometerStr = lastOdo.odometerString
                 }
+                // Preselect the grade this vehicle most recently used, falling
+                // back to the default for its fuel type.
+                fuelGrade = (vehicle.fillUps ?? [])
+                    .sorted { $0.date > $1.date }
+                    .compactMap(\.fuelGrade)
+                    .first ?? vehicle.fuelType.defaultGrade
                 foreignUnit = vehicle.fuelUnit == .gallons ? .liters : .gallons
                 foreignCurrency = vehicle.currency == .usd ? .cad : .usd
                 exchangeRateStr = "\(lastExchangeRate)"
@@ -436,12 +453,16 @@ struct AddFillUpView: View {
         let finalNotes = isCrossBorder ? (notes + appendedNotes) : notes
         let finalReceiptData = scannedImage?.jpegData(compressionQuality: 0.7)
         
+        // Charging has no fuel grade.
+        let finalGrade: FuelGrade? = isChargeMode ? nil : fuelGrade
+
         if let f = editingFillUp {
             f.date = date; f.odometer = odo; f.volume = finalVol; f.pricePerUnit = finalPPU; f.isFullTank = isChargeMode ? true : isFullTank; f.notes = finalNotes; f.receiptData = finalReceiptData
+            f.fuelGrade = finalGrade
             if let existingLoc = f.location { existingLoc.name = finalLocationName; existingLoc.latitude = latitude; existingLoc.longitude = longitude } else { f.location = resolveLocation(named: finalLocationName, latitude: latitude, longitude: longitude) }
         } else {
             let newLoc = resolveLocation(named: finalLocationName, latitude: latitude, longitude: longitude)
-            let newFillUp = FillUp(date: date, odometer: odo, volume: finalVol, pricePerUnit: finalPPU, isFullTank: isChargeMode ? true : isFullTank, notes: finalNotes, unit: isChargeMode ? .kwh : vehicle.fuelUnit, vehicle: vehicle, location: newLoc, receiptData: finalReceiptData)
+            let newFillUp = FillUp(date: date, odometer: odo, volume: finalVol, pricePerUnit: finalPPU, isFullTank: isChargeMode ? true : isFullTank, notes: finalNotes, unit: isChargeMode ? .kwh : vehicle.fuelUnit, grade: finalGrade, vehicle: vehicle, location: newLoc, receiptData: finalReceiptData)
             modelContext.insert(newFillUp)
             if vehicle.fillUps == nil { vehicle.fillUps = [] }
             vehicle.fillUps?.append(newFillUp)
