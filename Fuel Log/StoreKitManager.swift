@@ -31,11 +31,9 @@ final class StoreKitManager: ObservableObject {
     /// before the tip tiers existed still show as supporters and can restore.
     static let legacySupportProductID = "com.motosung.fuellog.support"
 
-    /// Tips are consumable, so they can't be restored through the App Store.
-    /// Remember that the user has supported at least once in iCloud key-value
-    /// storage, so the thank-you follows their Apple ID across devices and
-    /// survives reinstalls. UserDefaults mirrors it for offline launches.
-    private nonisolated static let hasSupportedKey = "hasSupportedDeveloper"
+    /// Tips are consumable, so they don't persist in `currentEntitlements`.
+    /// Remember that the user has supported at least once.
+    private static let hasSupportedKey = "hasSupportedDeveloper"
 
     @Published private(set) var products: [String: Product] = [:]
     @Published private(set) var isPurchasing = false
@@ -44,23 +42,9 @@ final class StoreKitManager: ObservableObject {
     @Published var purchaseCompleted = false
 
     private var updatesTask: Task<Void, Never>?
-    private var cloudObserver: NSObjectProtocol?
 
     init() {
-        let cloud = NSUbiquitousKeyValueStore.default
-        hasPurchasedSupport = cloud.bool(forKey: Self.hasSupportedKey)
-            || UserDefaults.standard.bool(forKey: Self.hasSupportedKey)
-
-        // Pick up a tip made on another device.
-        cloudObserver = NotificationCenter.default.addObserver(
-            forName: NSUbiquitousKeyValueStore.didChangeExternallyNotification,
-            object: cloud,
-            queue: .main
-        ) { [weak self] _ in
-            guard NSUbiquitousKeyValueStore.default.bool(forKey: Self.hasSupportedKey) else { return }
-            MainActor.assumeIsolated { self?.markSupported() }
-        }
-        cloud.synchronize()
+        hasPurchasedSupport = UserDefaults.standard.bool(forKey: Self.hasSupportedKey)
 
         updatesTask = Task { [weak self] in
             for await result in Transaction.updates {
@@ -84,7 +68,6 @@ final class StoreKitManager: ObservableObject {
 
     deinit {
         updatesTask?.cancel()
-        if let cloudObserver { NotificationCenter.default.removeObserver(cloudObserver) }
     }
 
     func loadProducts() async {
@@ -130,6 +113,14 @@ final class StoreKitManager: ObservableObject {
         }
     }
 
+    func restorePurchases() async {
+        do {
+            try await AppStore.sync()
+        } catch {
+            errorMessage = "Restore failed: \(error.localizedDescription)"
+        }
+    }
+
     private func handle(_ transaction: Transaction) async {
         let supportIDs = Set(SupportTier.allCases.map(\.rawValue) + [Self.legacySupportProductID])
         if supportIDs.contains(transaction.productID) {
@@ -142,8 +133,5 @@ final class StoreKitManager: ObservableObject {
     private func markSupported() {
         hasPurchasedSupport = true
         UserDefaults.standard.set(true, forKey: Self.hasSupportedKey)
-        let cloud = NSUbiquitousKeyValueStore.default
-        cloud.set(true, forKey: Self.hasSupportedKey)
-        cloud.synchronize()
     }
 }

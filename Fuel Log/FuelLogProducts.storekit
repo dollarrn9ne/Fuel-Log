@@ -26,8 +26,68 @@
         }
       ],
       "productID" : "com.motosung.fuellog.support",
-      "referenceName" : "Support Developer",
+      "referenceName" : "Support Developer (Legacy)",
       "type" : "NonConsumable"
+    },
+    {
+      "displayPrice" : "10.00",
+      "familyShareable" : false,
+      "internalID" : "B1000010",
+      "localizations" : [
+        {
+          "description" : "A $10 tip to support ongoing development of Fuel Log.",
+          "displayName" : "Support Developer - $10",
+          "locale" : "en_US"
+        }
+      ],
+      "productID" : "com.motosung.fuellog.tip10",
+      "referenceName" : "Tip 10",
+      "type" : "Consumable"
+    },
+    {
+      "displayPrice" : "25.00",
+      "familyShareable" : false,
+      "internalID" : "B1000025",
+      "localizations" : [
+        {
+          "description" : "A $25 tip to support ongoing development of Fuel Log.",
+          "displayName" : "Support Developer - $25",
+          "locale" : "en_US"
+        }
+      ],
+      "productID" : "com.motosung.fuellog.tip25",
+      "referenceName" : "Tip 25",
+      "type" : "Consumable"
+    },
+    {
+      "displayPrice" : "50.00",
+      "familyShareable" : false,
+      "internalID" : "B1000050",
+      "localizations" : [
+        {
+          "description" : "A $50 tip to support ongoing development of Fuel Log.",
+          "displayName" : "Support Developer - $50",
+          "locale" : "en_US"
+        }
+      ],
+      "productID" : "com.motosung.fuellog.tip50",
+      "referenceName" : "Tip 50",
+      "type" : "Consumable"
+    },
+    {
+      "displayPrice" : "100.00",
+      "familyShareable" : false,
+      "internalID" : "B1000100",
+      "localizations" : [
+        {
+          "description" : "A $100 tip to support ongoing development of Fuel Log.",
+          "displayName" : "Support Developer - $100",
+          "locale" : "en_US"
+        }
+      ],
+      "productID" : "com.motosung.fuellog.tip100",
+      "referenceName" : "Tip 100",
+      "type" : "Consumable"
     }
   ],
   "settings" : {

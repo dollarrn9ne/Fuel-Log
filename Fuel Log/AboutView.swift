@@ -128,47 +128,41 @@ struct AboutView: View {
                     }
                 }
                 
-                Button {
-                    Task { await storeKit.purchase() }
+                Menu {
+                    ForEach(SupportTier.allCases) { tier in
+                        Button(storeKit.displayPrice(for: tier)) {
+                            Task { await storeKit.purchase(tier) }
+                        }
+                    }
                 } label: {
                     HStack(spacing: 16) {
                         Image(systemName: "heart.fill")
                             .foregroundStyle(storeKit.hasPurchasedSupport ? .pink : .blue)
                             .font(.title3)
                             .frame(width: 24)
-                        
+
                         VStack(alignment: .leading) {
-                            Text(storeKit.hasPurchasedSupport ? "Thank You for Your Support!" : "Support Developer")
+                            Text("Support Developer")
                                 .foregroundStyle(.primary)
-                            if storeKit.hasPurchasedSupport {
-                                Text("You've already supported development")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
+                            Text(storeKit.hasPurchasedSupport
+                                 ? "Thank you for your support!"
+                                 : "Choose an amount to tip")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
                         }
-                        
+
                         Spacer()
-                        
+
                         if storeKit.isPurchasing {
                             ProgressView()
+                        } else {
+                            Image(systemName: "chevron.up.chevron.down")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
                         }
                     }
                 }
-                .disabled(storeKit.hasPurchasedSupport || storeKit.isPurchasing)
-                
-                Button {
-                    Task { await storeKit.restorePurchases() }
-                } label: {
-                    HStack(spacing: 16) {
-                        Image(systemName: "arrow.clockwise.circle.fill")
-                            .foregroundStyle(.blue)
-                            .font(.title3)
-                            .frame(width: 24)
-                        
-                        Text("Restore Purchases")
-                            .foregroundStyle(.primary)
-                    }
-                }
+                .disabled(storeKit.isPurchasing)
             }
         }
         .navigationTitle("About Fuel Log")
