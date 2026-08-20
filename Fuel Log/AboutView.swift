@@ -159,6 +159,10 @@ struct AboutView: View {
                 .disabled(storeKit.isPurchasing)
             }
 
+        }
+        // Pinned to the bottom of the screen rather than trailing the last row,
+        // so it sits consistently low on every device size.
+        .safeAreaInset(edge: .bottom) {
             VStack(spacing: 6) {
                 Text("@Motosung, 2026")
                 Text(appVersion)
@@ -166,9 +170,7 @@ struct AboutView: View {
             .font(.subheadline)
             .foregroundStyle(.secondary)
             .frame(maxWidth: .infinity)
-            .listRowBackground(Color.clear)
-            .listRowInsets(EdgeInsets())
-            .padding(.top, 48)
+            .padding(.bottom, 8)
         }
         .navigationTitle("About Fuel Log")
         .navigationBarTitleDisplayMode(.inline)
