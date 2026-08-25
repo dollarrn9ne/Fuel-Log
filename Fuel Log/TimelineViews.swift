@@ -42,6 +42,9 @@ struct FlightPathMap: View {
     /// MapKit's own compass and scale bar inward, which looks wrong on
     /// full-screen maps.
     var reservesRoomForAnnotationLabels: Bool = false
+    /// Reports the settled region so callers tracking zoom themselves stay in
+    /// step with pinch gestures.
+    var onCameraChange: ((MKCoordinateRegion) -> Void)? = nil
 
     var body: some View {
         Map(position: $position, bounds: minDistance > 0 ? MapCameraBounds(minimumDistance: minDistance) : nil, selection: $selectedItemID) {
@@ -55,6 +58,9 @@ struct FlightPathMap: View {
         }
         .mapStyle(mapStyle)
         .safeAreaPadding(insets)
+        .onMapCameraChange(frequency: .onEnd) { context in
+            onCameraChange?(context.region)
+        }
     }
 
     /// Insets steer where the camera frames content. When reserving room for

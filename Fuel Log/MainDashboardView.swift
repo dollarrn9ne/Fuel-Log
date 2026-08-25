@@ -100,7 +100,9 @@ struct MainDashboardView: View {
                 // background along the bottom edge.
                 // No insets: the camera is positioned by pannedRegion below, and
                 // insets would also shove MapKit's compass and scale bar inward.
-                FlightPathMap(events: displayedEvents, showLines: false, mapStyle: useSatellite ? .imagery : .standard, bottomPadding: 0, selectedItemID: $selectedEventID, position: $mapPosition)
+                FlightPathMap(events: displayedEvents, showLines: false, mapStyle: useSatellite ? .imagery : .standard, bottomPadding: 0, selectedItemID: $selectedEventID, position: $mapPosition, onCameraChange: { region in
+                    adoptUserZoom(region.span)
+                })
                     .transition(.opacity)
                     .onChange(of: selectedEventID) { _, newID in
                         if let id = newID, let ev = displayedEvents.first(where: { $0.id == id }) { mapEventToView = ev; selectedEventID = nil }
@@ -121,6 +123,13 @@ struct MainDashboardView: View {
                                 locationManager.requestLocation()
                             }
                         } label: { Image(systemName: "location.fill").font(.title3).foregroundColor(.primary).padding(12).background(.regularMaterial).clipShape(Circle()).shadow(radius: 2) }
+
+                        Button { zoomMap(by: 0.5, containerHeight: fullHeight(proxy)) } label: {
+                            Image(systemName: "plus").font(.title3).foregroundColor(.primary).padding(12).background(.regularMaterial).clipShape(Circle()).shadow(radius: 2)
+                        }.accessibilityLabel("Zoom in")
+                        Button { zoomMap(by: 2, containerHeight: fullHeight(proxy)) } label: {
+                            Image(systemName: "minus").font(.title3).foregroundColor(.primary).padding(12).background(.regularMaterial).clipShape(Circle()).shadow(radius: 2)
+                        }.accessibilityLabel("Zoom out")
                     }.padding().opacity(isMapReady ? 1 : 0)
                 }
                 Spacer()
@@ -202,6 +211,39 @@ struct MainDashboardView: View {
         // rather than panning the pins away.
         guard containerHeight - Self.mapTopMargin - sheetHeight > 120 else { return }
 
+        withAnimation(Self.mapReframeAnimation) {
+            mapPosition = .region(pannedRegion(coords: coords, span: span, containerHeight: containerHeight, sheetHeight: sheetHeight))
+        }
+    }
+
+    /// Records a zoom the user reached by pinching, so the next sheet drag pans
+    /// from there rather than snapping back.
+    ///
+    /// This fires for our own programmatic moves too, and MapKit adjusts the span
+    /// it reports to the view's aspect ratio. Adopting every report would let
+    /// that adjustment feed back into the next pan and drift the zoom, so only
+    /// clearly deliberate changes are taken.
+    private func adoptUserZoom(_ span: MKCoordinateSpan) {
+        guard let current = fittedSpan else { fittedSpan = span; return }
+        let ratio = span.latitudeDelta / max(current.latitudeDelta, .leastNonzeroMagnitude)
+        guard ratio < 0.9 || ratio > 1.1 else { return }
+        fittedSpan = span
+    }
+
+    /// Scales the zoom about the pins. `factor` below 1 zooms in, above 1 out.
+    private func zoomMap(by factor: Double, containerHeight: CGFloat) {
+        let coords = displayedEvents.compactMap(\.coordinate)
+        guard !coords.isEmpty, containerHeight > 0 else { return }
+
+        let current = fittedSpan ?? fittingSpan(for: coords, containerHeight: containerHeight)
+        // Clamp to MapKit's usable range so repeated taps can't wrap around.
+        let span = MKCoordinateSpan(
+            latitudeDelta: min(max(current.latitudeDelta * factor, 0.002), 120),
+            longitudeDelta: min(max(current.longitudeDelta * factor, 0.002), 120)
+        )
+        fittedSpan = span
+
+        let sheetHeight = containerHeight * sheetFraction
         withAnimation(Self.mapReframeAnimation) {
             mapPosition = .region(pannedRegion(coords: coords, span: span, containerHeight: containerHeight, sheetHeight: sheetHeight))
         }
