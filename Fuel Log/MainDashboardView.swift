@@ -397,7 +397,10 @@ struct DashboardSheetContent: View {
             // in the sheet's own animation, which is what made the old one
             // stutter. The system also owns the selection tick and dismissal.
             Menu {
-                Picker("Vehicle", selection: Binding(
+                // Two groups rather than four: every Section adds a divider and
+                // its own padding, which is what made the menu feel airy. An
+                // unlabelled Picker also avoids reserving space for a header.
+                Picker("", selection: Binding(
                     get: { vehicle.id },
                     set: { onSelectVehicle($0) }
                 )) {
@@ -405,14 +408,12 @@ struct DashboardSheetContent: View {
                         Text(v.name).tag(v.id)
                     }
                 }
+                .labelsHidden()
+
                 Section {
                     Button { vehicleToEdit = vehicle } label: { Label("Edit Vehicle...", systemImage: "pencil") }
                     Button { archiveCurrentVehicle() } label: { Label("Archive Vehicle", systemImage: "archivebox") }
-                }
-                Section {
                     Button { showingArchivedVehicles = true } label: { Label("Archived Vehicles", systemImage: "tray.full") }
-                }
-                Section {
                     Button(role: .destructive) { showingDeleteConfirmation = true } label: { Label("Delete Vehicle", systemImage: "trash") }
                 }
             } label: {
