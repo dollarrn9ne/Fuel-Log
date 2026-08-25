@@ -83,8 +83,14 @@ struct MainDashboardView: View {
                 // pins bunched up along the bottom edge and out of sight.
                 let sheetHeight = proxy.size.height * sheetFraction
                 FlightPathMap(events: displayedEvents, showLines: false, mapStyle: useSatellite ? .imagery : .standard, bottomPadding: sheetHeight + Self.mapBottomMargin, selectedItemID: $selectedEventID, position: $mapPosition, topPadding: Self.mapTopInset, horizontalPadding: 40)
-                    // Ease the inset in step with the camera instead of snapping.
-                    .animation(Self.mapReframeAnimation, value: sheetDetent)
+                    // The map must always fill the screen behind the sheet. The
+                    // insets only steer where the camera frames content; without
+                    // pinning the frame, a changing bottom inset can shrink the
+                    // map and let the background show through as a band above
+                    // the sheet. Applied here rather than inside FlightPathMap,
+                    // which is also used in fixed-height cards.
+                    .frame(width: proxy.size.width, height: proxy.size.height)
+                    .ignoresSafeArea()
                     .transition(.opacity)
                     .onChange(of: selectedEventID) { _, newID in
                         if let id = newID, let ev = displayedEvents.first(where: { $0.id == id }) { mapEventToView = ev; selectedEventID = nil }
