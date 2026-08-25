@@ -37,6 +37,9 @@ struct FlightPathMap: View {
     var minDistance: CLLocationDistance = 0
     var topPadding: CGFloat = 0
     var horizontalPadding: CGFloat = 0
+    /// Extra inset on the trailing edge only, for layouts that put a panel beside
+    /// the map rather than over its bottom.
+    var trailingPadding: CGFloat = 0
     /// Opt in for short map cards, where a pin fitted to the edge would have its
     /// title label clipped. Off by default because these insets also push
     /// MapKit's own compass and scale bar inward, which looks wrong on
@@ -68,7 +71,7 @@ struct FlightPathMap: View {
     /// title on screen.
     private var insets: EdgeInsets {
         guard reservesRoomForAnnotationLabels else {
-            return EdgeInsets(top: topPadding, leading: horizontalPadding, bottom: bottomPadding, trailing: horizontalPadding)
+            return EdgeInsets(top: topPadding, leading: horizontalPadding, bottom: bottomPadding, trailing: horizontalPadding + trailingPadding)
         }
         return EdgeInsets(
             top: max(topPadding, Self.minimumAnnotationInset),

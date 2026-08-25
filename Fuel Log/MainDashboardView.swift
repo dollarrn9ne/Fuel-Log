@@ -46,6 +46,11 @@ struct MainDashboardView: View {
     @State private var selectedLogTab: LogTabChoice = .fuel
     @StateObject private var locationManager = CurrentLocationManager()
     @State private var isMapReady = false
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    /// Width of the side panel in wide windows, adjustable by dragging its edge.
+    @State private var panelWidth: CGFloat = 420
+    @State private var panelDragStartWidth: CGFloat?
+    @State private var sidePanelActive = false
     
     var timelineEvents: [VehicleEvent] {
         let fills = (vehicle.fillUps ?? []).map(VehicleEvent.fillUp), svcs = (vehicle.services ?? []).map(VehicleEvent.service)
@@ -107,6 +112,18 @@ struct MainDashboardView: View {
         return Self.smallestSheetFraction
     }
 
+    /// In a wide window the panel sits beside the map instead of over it, so it
+    /// gets the full height and every row is reachable without dragging.
+    ///
+    /// Keyed off the size class and aspect ratio rather than the iPad idiom, so
+    /// any window that ends up short and wide gets the same treatment.
+    private func usesSidePanel(_ proxy: GeometryProxy) -> Bool {
+        horizontalSizeClass == .regular && proxy.size.width > proxy.size.height
+    }
+
+    private static let minimumPanelWidth: CGFloat = 340
+    private static let maximumPanelWidth: CGFloat = 620
+
     var body: some View {
         GeometryReader { proxy in
         ZStack(alignment: .top) {
@@ -129,7 +146,14 @@ struct MainDashboardView: View {
                 // as the sheet moved re-framed the camera mid-animation, which is
                 // what made resizing feel abrupt. The camera maths below accounts
                 // for this one fixed value.
-                FlightPathMap(events: displayedEvents, showLines: false, mapStyle: useSatellite ? .imagery : .standard, bottomPadding: attributionInset(fullHeight(proxy)), selectedItemID: $selectedEventID, position: $mapPosition, onCameraChange: { region in
+                FlightPathMap(events: displayedEvents, showLines: false, mapStyle: useSatellite ? .imagery : .standard,
+                              bottomPadding: usesSidePanel(proxy) ? 0 : attributionInset(fullHeight(proxy)),
+                              selectedItemID: $selectedEventID, position: $mapPosition,
+                              // Beside the map, the panel occludes the trailing edge
+                              // rather than the bottom, so the attribution and the
+                              // camera both need the inset over there instead.
+                              trailingPadding: usesSidePanel(proxy) ? panelWidth : 0,
+                              onCameraChange: { region in
                     adoptUserZoom(region.span)
                 })
                     .transition(.opacity)
@@ -187,7 +211,17 @@ struct MainDashboardView: View {
         // The pins themselves changed, so a fresh zoom is warranted.
         .onChange(of: vehicle.id) { _, _ in refitMap(containerHeight: fullHeight(proxy), refreshZoom: true) }
         .onChange(of: selectedLogTab) { _, _ in refitMap(containerHeight: fullHeight(proxy), refreshZoom: true) }
-        .sheet(isPresented: .constant(true)) {
+        // Beside the map in a wide window, over its bottom otherwise. Tracked in
+        // state as well so the camera maths doesn't need the proxy passed to it.
+        .overlay(alignment: .trailing) {
+            if usesSidePanel(proxy) { sidePanel }
+        }
+        .onAppear { sidePanelActive = usesSidePanel(proxy) }
+        .onChange(of: usesSidePanel(proxy)) { _, isSide in
+            sidePanelActive = isSide
+            refitMap(containerHeight: fullHeight(proxy), refreshZoom: true)
+        }
+        .sheet(isPresented: .constant(!usesSidePanel(proxy))) {
             DashboardSheetContent(colorScheme: _colorScheme, vehicle: vehicle, allVehicles: allVehicles, events: timelineEvents, onSelectVehicle: onSelectVehicle, newReportMonth: newReportMonth, onAcknowledgeReport: onAcknowledgeReport, selectedLogTab: $selectedLogTab, sheetDetent: $sheetDetent)
                 .presentationDetents([.fraction(0.35), .fraction(0.65), .large], selection: $sheetDetent)
                 .presentationDragIndicator(.visible).presentationBackgroundInteraction(.enabled(upThrough: .fraction(0.65))).interactiveDismissDisabled()
@@ -222,11 +256,60 @@ struct MainDashboardView: View {
     /// move no easing curve can make feel gentle. Panning is a small move, so it
     /// reads as smooth. Pass `refreshZoom` when the content itself changed and a
     /// new zoom is warranted.
+    /// Full-height panel pinned to the trailing edge, with a draggable leading
+    /// edge. Nothing is hidden behind a detent here, so every row is reachable by
+    /// scrolling rather than by opening the panel further.
+    private var sidePanel: some View {
+        HStack(spacing: 0) {
+            panelResizeHandle
+            DashboardSheetContent(colorScheme: _colorScheme, vehicle: vehicle, allVehicles: allVehicles, events: timelineEvents, onSelectVehicle: onSelectVehicle, newReportMonth: newReportMonth, onAcknowledgeReport: onAcknowledgeReport, selectedLogTab: $selectedLogTab, sheetDetent: .constant(.large))
+                .frame(width: panelWidth)
+                .background(.regularMaterial)
+        }
+        .transition(.move(edge: .trailing))
+    }
+
+    private var panelResizeHandle: some View {
+        Rectangle()
+            .fill(Color.clear)
+            .frame(width: 18)
+            .overlay {
+                Capsule()
+                    .fill(.secondary.opacity(0.5))
+                    .frame(width: 5, height: 44)
+            }
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture()
+                    .onChanged { value in
+                        // Anchor to the width the drag began at, otherwise each
+                        // update compounds the last one and the panel races away.
+                        let start = panelDragStartWidth ?? panelWidth
+                        panelDragStartWidth = start
+                        panelWidth = min(max(start - value.translation.width, Self.minimumPanelWidth), Self.maximumPanelWidth)
+                    }
+                    .onEnded { _ in panelDragStartWidth = nil }
+            )
+            .accessibilityLabel("Resize panel")
+    }
+
     private func refitMap(containerHeight: CGFloat, refreshZoom: Bool = false) {
         let coords = displayedEvents.compactMap(\.coordinate)
         guard !coords.isEmpty, containerHeight > 0 else { return }
 
         if refreshZoom { fittedSpan = nil }
+
+        // Beside the map, nothing covers the bottom, so there is no strip to pan
+        // the pins into: centre them and let the trailing inset keep them clear
+        // of the panel. The vertical maths below is portrait-only by design.
+        if sidePanelActive {
+            let span = fittedSpan ?? sideBySideSpan(for: coords)
+            fittedSpan = span
+            withAnimation(Self.mapReframeAnimation) {
+                mapPosition = .region(MKCoordinateRegion(center: boundingCentre(of: coords), span: span))
+            }
+            return
+        }
         let span = fittedSpan ?? fittingSpan(for: coords, containerHeight: containerHeight)
         fittedSpan = span
 
@@ -256,6 +339,22 @@ struct MainDashboardView: View {
         let ratio = span.latitudeDelta / max(current.latitudeDelta, .leastNonzeroMagnitude)
         guard ratio < 0.9 || ratio > 1.1 else { return }
         fittedSpan = span
+    }
+
+    private func boundingCentre(of coords: [CLLocationCoordinate2D]) -> CLLocationCoordinate2D {
+        let lats = coords.map(\.latitude), lons = coords.map(\.longitude)
+        return CLLocationCoordinate2D(latitude: ((lats.min() ?? 0) + (lats.max() ?? 0)) / 2,
+                                      longitude: ((lons.min() ?? 0) + (lons.max() ?? 0)) / 2)
+    }
+
+    /// Pins plus a margin. MapKit fits this into the area the panel leaves, so
+    /// unlike the portrait case there is no strip ratio to correct for.
+    private func sideBySideSpan(for coords: [CLLocationCoordinate2D]) -> MKCoordinateSpan {
+        let lats = coords.map(\.latitude), lons = coords.map(\.longitude)
+        let latSpread = (lats.max() ?? 0) - (lats.min() ?? 0)
+        let lonSpread = (lons.max() ?? 0) - (lons.min() ?? 0)
+        return MKCoordinateSpan(latitudeDelta: max(latSpread * 1.4, 0.05),
+                                longitudeDelta: max(lonSpread * 1.4, 0.05))
     }
 
     /// A span containing every coordinate, floored so a single pin doesn't zoom
