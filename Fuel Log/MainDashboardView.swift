@@ -418,10 +418,23 @@ struct DashboardSheetContent: View {
                 }
             } label: {
                 HStack(spacing: 6) {
-                    Text(vehicle.name).font(.title2.weight(.heavy)).foregroundColor(.primary).lineLimit(2)
+                    Text(vehicle.name)
+                        .font(.title2.weight(.heavy))
+                        .foregroundColor(.primary)
+                        // One line, shrinking only as far as 75% so a long name
+                        // stays close to the surrounding type rather than
+                        // becoming conspicuously small.
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
+                        .allowsTightening(true)
                     Image(systemName: "chevron.down").font(.subheadline.weight(.bold)).foregroundColor(.secondary)
                 }
-            }.frame(maxWidth: .infinity, alignment: .leading)
+            }
+            // The app is rounded throughout, so ask for it here too. UIKit draws
+            // system menu rows and may ignore this; if the menu still renders in
+            // the default face, that's the platform's call, not a missing setting.
+            .fontDesign(.rounded)
+            .frame(maxWidth: .infinity, alignment: .leading)
             
             HStack(spacing: 12) {
                 Button { showingAddVehicle = true } label: { Image(systemName: "plus").font(.system(size: 20, weight: .semibold)).foregroundColor(.primary).frame(width: 44, height: 44).background(Color(uiColor: .tertiarySystemFill), in: Circle()) }
