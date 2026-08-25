@@ -40,6 +40,8 @@ struct MainDashboardView: View {
     @State private var selectedEventID: UUID?
     @State private var mapEventToView: VehicleEvent?
     @State private var mapPosition: MapCameraPosition = .automatic
+    /// Zoom chosen when the pins last changed, held steady while the sheet moves.
+    @State private var fittedSpan: MKCoordinateSpan?
     @State private var sheetDetent: PresentationDetent = .fraction(0.35)
     @State private var selectedLogTab: LogTabChoice = .fuel
     @StateObject private var locationManager = CurrentLocationManager()
@@ -57,7 +59,10 @@ struct MainDashboardView: View {
     /// Insets kept out of the map's usable area: room for the floating controls
     /// at the top, and a little breathing room above the sheet.
     private static let mapTopInset: CGFloat = 80
-    private static let mapBottomMargin: CGFloat = 24
+    /// Constant, so the camera's placement doesn't shift as the sheet resizes.
+    /// Keeping the pins clear of the sheet is handled by panning instead, which
+    /// avoids both the zoom lurch and the layout bugs an animated inset caused.
+    private static let mapBottomInset: CGFloat = 46
 
     /// One curve shared by the camera move and the map's inset change. They must
     /// match: animating the camera while the usable area snaps instantly is what
@@ -70,12 +75,15 @@ struct MainDashboardView: View {
         proxy.size.height + proxy.safeAreaInsets.top + proxy.safeAreaInsets.bottom
     }
 
+    /// The smallest detent offered, and the app's default.
+    private static let smallestSheetFraction: CGFloat = 0.35
+
     /// How much of the screen the bottom sheet currently covers. `PresentationDetent`
     /// doesn't expose its fraction, so map the known detents back to their values.
     private var sheetFraction: CGFloat {
         if sheetDetent == .large { return 0.92 }
         if sheetDetent == .fraction(0.65) { return 0.65 }
-        return 0.35
+        return Self.smallestSheetFraction
     }
 
     var body: some View {
@@ -91,8 +99,7 @@ struct MainDashboardView: View {
                 // the full height. `proxy.size` excludes the safe area, and
                 // pinning the map to that shorter height left a band of
                 // background along the bottom edge.
-                let sheetHeight = fullHeight(proxy) * sheetFraction
-                FlightPathMap(events: displayedEvents, showLines: false, mapStyle: useSatellite ? .imagery : .standard, bottomPadding: sheetHeight + Self.mapBottomMargin, selectedItemID: $selectedEventID, position: $mapPosition, topPadding: Self.mapTopInset, horizontalPadding: 40)
+                FlightPathMap(events: displayedEvents, showLines: false, mapStyle: useSatellite ? .imagery : .standard, bottomPadding: Self.mapBottomInset, selectedItemID: $selectedEventID, position: $mapPosition, topPadding: Self.mapTopInset, horizontalPadding: 40)
                     .transition(.opacity)
                     .onChange(of: selectedEventID) { _, newID in
                         if let id = newID, let ev = displayedEvents.first(where: { $0.id == id }) { mapEventToView = ev; selectedEventID = nil }
@@ -139,9 +146,15 @@ struct MainDashboardView: View {
                     }
                 } else if mapEvents.count == 1, let coord = mapEvents.first?.coordinate {
                     mapPosition = .region(MKCoordinateRegion(center: coord, latitudinalMeters: 5000, longitudinalMeters: 5000))
+                } else {
+                    // Establish the zoom once, so later sheet drags only pan.
+                    refitMap(containerHeight: fullHeight(proxy), refreshZoom: true)
                 }
             }
         }
+        // The pins themselves changed, so a fresh zoom is warranted.
+        .onChange(of: vehicle.id) { _, _ in refitMap(containerHeight: fullHeight(proxy), refreshZoom: true) }
+        .onChange(of: selectedLogTab) { _, _ in refitMap(containerHeight: fullHeight(proxy), refreshZoom: true) }
         .sheet(isPresented: .constant(true)) {
             DashboardSheetContent(colorScheme: _colorScheme, vehicle: vehicle, allVehicles: allVehicles, events: timelineEvents, onSelectVehicle: onSelectVehicle, newReportMonth: newReportMonth, onAcknowledgeReport: onAcknowledgeReport, selectedLogTab: $selectedLogTab, sheetDetent: $sheetDetent)
                 .presentationDetents([.fraction(0.35), .fraction(0.65), .large], selection: $sheetDetent)
@@ -168,41 +181,73 @@ struct MainDashboardView: View {
     ///
     /// Sets an explicit region rather than reassigning `.automatic`: assigning the
     /// same value isn't seen as a change, so the fit would never recompute.
-    private func refitMap(containerHeight: CGFloat) {
+    /// Slides the camera so the pins sit in the strip the sheet leaves visible.
+    ///
+    /// The zoom is held constant on purpose. Re-fitting the span meant the same
+    /// pins had to squeeze into a much shorter strip, which is a large camera
+    /// move no easing curve can make feel gentle. Panning is a small move, so it
+    /// reads as smooth. Pass `refreshZoom` when the content itself changed and a
+    /// new zoom is warranted.
+    private func refitMap(containerHeight: CGFloat, refreshZoom: Bool = false) {
         let coords = displayedEvents.compactMap(\.coordinate)
         guard !coords.isEmpty, containerHeight > 0 else { return }
 
-        let bottomInset = containerHeight * sheetFraction + Self.mapBottomMargin
-        let visibleHeight = containerHeight - Self.mapTopInset - bottomInset
-        // Near-fully covered: too little map left to aim at, and fitting into a
-        // sliver blows the zoom out to nothing. Leave the camera as it is.
-        guard visibleHeight > 120 else { return }
+        if refreshZoom { fittedSpan = nil }
+        let span = fittedSpan ?? fittingSpan(for: coords, containerHeight: containerHeight)
+        fittedSpan = span
+
+        let sheetHeight = containerHeight * sheetFraction
+        // Near-fully covered: nothing meaningful left to aim at, so hold still
+        // rather than panning the pins away.
+        guard containerHeight - Self.mapTopInset - sheetHeight > 120 else { return }
 
         withAnimation(Self.mapReframeAnimation) {
-            mapPosition = .region(region(fitting: coords))
+            mapPosition = .region(pannedRegion(coords: coords, span: span, containerHeight: containerHeight, sheetHeight: sheetHeight))
         }
     }
 
-    /// The smallest region containing every coordinate, with margin so pins
-    /// aren't flush against the edges.
+    /// A span containing every coordinate, floored so a single pin doesn't zoom
+    /// to street level.
     ///
-    /// Deliberately does not offset the centre to account for the sheet: the
-    /// map's `safeAreaPadding` already biases the camera into the visible strip,
-    /// and compensating again over-corrects far enough to push pins off screen.
-    private func region(fitting coords: [CLLocationCoordinate2D]) -> MKCoordinateRegion {
+    /// Sized against the strip left visible at the *smallest* detent, not the
+    /// whole map: since the zoom then stays put while the sheet moves, fitting
+    /// the full height would leave pins tucked behind the sheet even at the
+    /// default height, which is the problem this all started with.
+    private func fittingSpan(for coords: [CLLocationCoordinate2D], containerHeight: CGFloat) -> MKCoordinateSpan {
         let lats = coords.map(\.latitude), lons = coords.map(\.longitude)
         guard let minLat = lats.min(), let maxLat = lats.max(),
               let minLon = lons.min(), let maxLon = lons.max() else {
-            return MKCoordinateRegion(center: coords[0], latitudinalMeters: 5000, longitudinalMeters: 5000)
+            return MKCoordinateSpan(latitudeDelta: 0.05, longitudeDelta: 0.05)
         }
-        let center = CLLocationCoordinate2D(latitude: (minLat + maxLat) / 2, longitude: (minLon + maxLon) / 2)
-        // Floor the span so a single pin (or several very close together) doesn't
-        // zoom to street level.
-        let span = MKCoordinateSpan(
-            latitudeDelta: max((maxLat - minLat) * 1.4, 0.05),
+        let insetHeight = max(containerHeight - Self.mapTopInset - Self.mapBottomInset, 1)
+        let smallestStrip = max(containerHeight - Self.mapTopInset - containerHeight * Self.smallestSheetFraction, 1)
+        // Zoom out by however much taller the inset area is than that strip,
+        // leaving a margin so pins don't sit on the edges.
+        let scale = (insetHeight / smallestStrip) / 0.8
+        return MKCoordinateSpan(
+            latitudeDelta: max((maxLat - minLat) * scale, 0.05),
             longitudeDelta: max((maxLon - minLon) * 1.4, 0.05)
         )
-        return MKCoordinateRegion(center: center, span: span)
+    }
+
+    /// The pins' bounding box centred in the visible strip, at a fixed zoom.
+    ///
+    /// The map's insets are constant, so the camera centre lands at the middle of
+    /// the inset area. Shifting it south by half the sheet's height lifts the
+    /// pins into the uncovered strip.
+    private func pannedRegion(coords: [CLLocationCoordinate2D], span: MKCoordinateSpan, containerHeight: CGFloat, sheetHeight: CGFloat) -> MKCoordinateRegion {
+        let lats = coords.map(\.latitude), lons = coords.map(\.longitude)
+        let centreLat = ((lats.min() ?? 0) + (lats.max() ?? 0)) / 2
+        let centreLon = ((lons.min() ?? 0) + (lons.max() ?? 0)) / 2
+
+        let insetHeight = max(containerHeight - Self.mapTopInset - Self.mapBottomInset, 1)
+        let shiftPoints = (sheetHeight - Self.mapBottomInset) / 2
+        let degreesPerPoint = span.latitudeDelta / insetHeight
+
+        return MKCoordinateRegion(
+            center: CLLocationCoordinate2D(latitude: centreLat - degreesPerPoint * shiftPoints, longitude: centreLon),
+            span: span
+        )
     }
 }
 
