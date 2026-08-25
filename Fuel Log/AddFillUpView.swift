@@ -470,7 +470,11 @@ struct AddFillUpView: View {
             f.date = date; f.odometer = odo; f.volume = finalVol; f.pricePerUnit = finalPPU; f.isFullTank = isChargeMode ? true : isFullTank; f.notes = finalNotes; f.receiptData = finalReceiptData
             f.fuelGrade = finalGrade
             f.customGradeLabel = finalGradeLabel
-            if let existingLoc = f.location { existingLoc.name = finalLocationName; existingLoc.latitude = latitude; existingLoc.longitude = longitude } else { f.location = resolveLocation(named: finalLocationName, latitude: latitude, longitude: longitude) }
+            // Point this fill-up at the right station rather than editing the
+            // station itself. GasLocation is shared by every log that used it, so
+            // renaming it in place renamed all of them - log Costco then Chevron,
+            // and both rows read Chevron.
+            f.location = resolveLocation(named: finalLocationName, latitude: latitude, longitude: longitude)
         } else {
             let newLoc = resolveLocation(named: finalLocationName, latitude: latitude, longitude: longitude)
             let newFillUp = FillUp(date: date, odometer: odo, volume: finalVol, pricePerUnit: finalPPU, isFullTank: isChargeMode ? true : isFullTank, notes: finalNotes, unit: isChargeMode ? .kwh : vehicle.fuelUnit, grade: finalGrade, vehicle: vehicle, location: newLoc, receiptData: finalReceiptData)
@@ -496,8 +500,8 @@ struct AddFillUpView: View {
     private func resolveLocation(named name: String, latitude: Double, longitude: Double) -> GasLocation? {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty || latitude != 0 else { return nil }
-        let existing = (try? modelContext.fetch(FetchDescriptor<GasLocation>()))?.first(where: { $0.name.caseInsensitiveCompare(trimmed) == .orderedSame })
-        if let existing { return existing }
+        let candidates = (try? modelContext.fetch(FetchDescriptor<GasLocation>())) ?? []
+        if let existing = GasLocation.matching(name: trimmed, latitude: latitude, longitude: longitude, in: candidates) { return existing }
         let loc = GasLocation(name: trimmed, latitude: latitude, longitude: longitude)
         modelContext.insert(loc)
         return loc

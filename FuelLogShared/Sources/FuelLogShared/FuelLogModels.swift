@@ -1,5 +1,6 @@
 import Foundation
 import SwiftData
+import CoreLocation
 
 // MARK: - Efficiency Conversion
 
@@ -305,6 +306,32 @@ public enum EfficiencyConverter {
     public init(id: UUID = UUID(), name: String, latitude: Double, longitude: Double) {
         self.id = id; self.name = name; self.latitude = latitude; self.longitude = longitude
     }
+}
+
+public extension GasLocation {
+    /// Two stations nearer than this are taken to be the same forecourt, so
+    /// re-logging at one reuses its record instead of piling up duplicate pins.
+    static let samePlaceRadiusMetres: Double = 150
+
+    /// The record for a station, or nil when a new one is needed.
+    ///
+    /// Matches on name *and* position. Name alone folded distinct stations that
+    /// share a brand into one record - every Chevron in the state became a single
+    /// pin - and since the match returned the existing record untouched, later
+    /// logs silently inherited the first one's coordinates.
+    static func matching(name: String, latitude: Double, longitude: Double, in candidates: [GasLocation]) -> GasLocation? {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        return candidates.first { candidate in
+            guard candidate.name.caseInsensitiveCompare(trimmed) == .orderedSame else { return false }
+            // Records from CSV import and Shortcuts carry no coordinates, so
+            // there is nothing to compare and the name has to stand on its own.
+            guard candidate.hasCoordinates, latitude != 0 || longitude != 0 else { return true }
+            let a = CLLocation(latitude: candidate.latitude, longitude: candidate.longitude)
+            return a.distance(from: CLLocation(latitude: latitude, longitude: longitude)) <= samePlaceRadiusMetres
+        }
+    }
+
+    var hasCoordinates: Bool { latitude != 0 || longitude != 0 }
 }
 
 // MARK: - TripCategory

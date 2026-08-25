@@ -180,7 +180,9 @@ struct AddServiceView: View {
         
         if let s = editingService {
             s.date = date; s.odometer = odo; s.type = type; s.cost = cost; s.notes = notes; s.receiptData = finalReceiptData
-            if let existingLoc = s.location { existingLoc.name = finalLocationName; existingLoc.latitude = latitude; existingLoc.longitude = longitude } else { s.location = resolveLocation(named: finalLocationName, latitude: latitude, longitude: longitude) }
+            // Re-point rather than rename: GasLocation is shared, so editing it
+            // in place renamed every other log at the same place.
+            s.location = resolveLocation(named: finalLocationName, latitude: latitude, longitude: longitude)
         } else {
             let newLoc = resolveLocation(named: finalLocationName, latitude: latitude, longitude: longitude)
             let newService = ServiceRecord(date: date, odometer: odo, type: type, cost: cost, notes: notes, vehicle: vehicle, location: newLoc, receiptData: finalReceiptData)
@@ -240,8 +242,8 @@ struct AddServiceView: View {
     private func resolveLocation(named name: String, latitude: Double, longitude: Double) -> GasLocation? {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty || latitude != 0 else { return nil }
-        let existing = (try? modelContext.fetch(FetchDescriptor<GasLocation>()))?.first(where: { $0.name.caseInsensitiveCompare(trimmed) == .orderedSame })
-        if let existing { return existing }
+        let candidates = (try? modelContext.fetch(FetchDescriptor<GasLocation>())) ?? []
+        if let existing = GasLocation.matching(name: trimmed, latitude: latitude, longitude: longitude, in: candidates) { return existing }
         let loc = GasLocation(name: trimmed, latitude: latitude, longitude: longitude)
         modelContext.insert(loc)
         return loc
