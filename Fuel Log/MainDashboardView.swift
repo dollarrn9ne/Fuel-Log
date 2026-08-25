@@ -322,6 +322,10 @@ struct DashboardSheetContent: View {
     @State private var monthlyReportMonth = Date()
     @State private var eventToEdit: VehicleEvent?
     @State private var vehicleToEdit: Vehicle?
+    @State private var showingVehiclePicker = false
+    /// Set only when opening the picker had to borrow height from the sheet, so
+    /// the sheet can be put back exactly where the user left it.
+    @State private var detentBeforeVehiclePicker: PresentationDetent?
     @State private var vehicleShareItem: VehicleShareItem?
     
     @State private var searchText: String = ""
@@ -392,30 +396,13 @@ struct DashboardSheetContent: View {
     
     private var headerBar: some View {
         HStack(spacing: 16) {
-            // A system Menu rather than a hand-rolled overlay: it renders outside
-            // the sheet, so it needs no room made for it and can't be caught up
-            // in the sheet's own animation, which is what made the old one
-            // stutter. The system also owns the selection tick and dismissal.
-            Menu {
-                // Two groups rather than four: every Section adds a divider and
-                // its own padding, which is what made the menu feel airy. An
-                // unlabelled Picker also avoids reserving space for a header.
-                Picker("", selection: Binding(
-                    get: { vehicle.id },
-                    set: { onSelectVehicle($0) }
-                )) {
-                    ForEach(allVehicles) { v in
-                        Text(v.name).tag(v.id)
-                    }
-                }
-                .labelsHidden()
-
-                Section {
-                    Button { vehicleToEdit = vehicle } label: { Label("Edit Vehicle...", systemImage: "pencil") }
-                    Button { archiveCurrentVehicle() } label: { Label("Archive Vehicle", systemImage: "archivebox") }
-                    Button { showingArchivedVehicles = true } label: { Label("Archived Vehicles", systemImage: "tray.full") }
-                    Button(role: .destructive) { showingDeleteConfirmation = true } label: { Label("Delete Vehicle", systemImage: "trash") }
-                }
+            // A popover rather than a system Menu. The system picks which way a
+            // Menu opens, and with the sheet lowered it always chose upward, over
+            // the map. A popover can be pinned below the name, and because we
+            // decide when it appears we can raise the sheet first to make room.
+            // It also draws its own rows, so the rounded face carries through.
+            Button {
+                openVehiclePicker()
             } label: {
                 HStack(spacing: 6) {
                     Text(vehicle.name)
@@ -430,10 +417,18 @@ struct DashboardSheetContent: View {
                     Image(systemName: "chevron.down").font(.subheadline.weight(.bold)).foregroundColor(.secondary)
                 }
             }
-            // The app is rounded throughout, so ask for it here too. UIKit draws
-            // system menu rows and may ignore this; if the menu still renders in
-            // the default face, that's the platform's call, not a missing setting.
-            .fontDesign(.rounded)
+            .buttonStyle(.plain)
+            .popover(isPresented: $showingVehiclePicker, attachmentAnchor: .rect(.bounds), arrowEdge: .bottom) {
+                vehiclePickerMenu
+                    // Without this a popover collapses into a sheet on iPhone,
+                    // which would lose the anchoring that this whole change is for.
+                    .presentationCompactAdaptation(.popover)
+            }
+            .onChange(of: showingVehiclePicker) { _, isShowing in
+                guard !isShowing, let previous = detentBeforeVehiclePicker else { return }
+                detentBeforeVehiclePicker = nil
+                withAnimation(Self.pickerDetentAnimation) { sheetDetent = previous }
+            }
             .frame(maxWidth: .infinity, alignment: .leading)
             
             HStack(spacing: 12) {
@@ -465,7 +460,94 @@ struct DashboardSheetContent: View {
             }
         }.padding(.horizontal, 24).padding(.top, 24).padding(.bottom, 16)
     }
-    
+
+    private static let pickerDetentAnimation: Animation = .smooth(duration: 0.32)
+    /// Room for roughly five rows; past that the list scrolls rather than growing
+    /// a popover taller than the sheet it has to sit inside.
+    private static let scrollingVehicleListHeight: CGFloat = 220
+
+    /// The popover hangs below the vehicle name, so the sheet has to be tall
+    /// enough to hold it. Raise it first and let the detent change land, else the
+    /// popover is placed against the old, shorter sheet and the system flips it
+    /// back above the name.
+    private func openVehiclePicker() {
+        guard sheetDetent == .fraction(0.35) else {
+            showingVehiclePicker = true
+            return
+        }
+        detentBeforeVehiclePicker = sheetDetent
+        withAnimation(Self.pickerDetentAnimation) { sheetDetent = .fraction(0.65) }
+        Task {
+            try? await Task.sleep(for: .milliseconds(340))
+            showingVehiclePicker = true
+        }
+    }
+
+    private var vehiclePickerMenu: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if allVehicles.count > 5 {
+                ScrollView { vehiclePickerRows }
+                    .frame(height: Self.scrollingVehicleListHeight)
+            } else {
+                vehiclePickerRows
+            }
+
+            Divider().padding(.vertical, 4)
+
+            vehiclePickerRow(title: "Edit Vehicle...", icon: "pencil", defersAction: true) { vehicleToEdit = vehicle }
+            vehiclePickerRow(title: "Archive Vehicle", icon: "archivebox", defersAction: true) { archiveCurrentVehicle() }
+            vehiclePickerRow(title: "Archived Vehicles", icon: "tray.full", defersAction: true) { showingArchivedVehicles = true }
+            vehiclePickerRow(title: "Delete Vehicle", icon: "trash", isDestructive: true, defersAction: true) { showingDeleteConfirmation = true }
+        }
+        .padding(.vertical, 8)
+        .frame(width: 260)
+        .fontDesign(.rounded)
+    }
+
+    private var vehiclePickerRows: some View {
+        ForEach(allVehicles) { v in
+            vehiclePickerRow(title: v.name, icon: v.id == vehicle.id ? "checkmark" : nil) {
+                onSelectVehicle(v.id)
+            }
+        }
+    }
+
+    /// - Parameter defersAction: for rows that present a sheet or alert. Firing
+    ///   while the popover is still up leaves the two fighting over the
+    ///   presentation, so those wait for it to close first. Vehicle selection
+    ///   presents nothing and runs immediately, which keeps switching snappy.
+    private func vehiclePickerRow(
+        title: String,
+        icon: String?,
+        isDestructive: Bool = false,
+        defersAction: Bool = false,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button {
+            showingVehiclePicker = false
+            guard defersAction else { action(); return }
+            Task {
+                try? await Task.sleep(for: .milliseconds(260))
+                action()
+            }
+        } label: {
+            HStack(spacing: 12) {
+                Text(title)
+                    .font(.body.weight(.semibold))
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+                if let icon {
+                    Image(systemName: icon).font(.subheadline.weight(.semibold))
+                }
+            }
+            .foregroundStyle(isDestructive ? Color.red : Color.primary)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 11)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
     /// Creates a "share for logging" link for the current vehicle and presents
     /// the system share sheet. A borrower opens the link in the App Clip, logs a
     /// fill-up, and it syncs back into this vehicle via the relay.
