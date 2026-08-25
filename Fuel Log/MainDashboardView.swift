@@ -109,13 +109,19 @@ struct MainDashboardView: View {
         return Self.smallestSheetFraction
     }
 
-    /// In a wide window the panel sits beside the map instead of over it, so it
-    /// gets the full height and every row is reachable without dragging.
+    /// In a roomy window the panel sits beside the map instead of over it, so it
+    /// gets the full height and every row is reachable by scrolling.
     ///
-    /// Keyed off the size class and aspect ratio rather than the iPad idiom, so
-    /// any window that ends up short and wide gets the same treatment.
-    private func usesSidePanel(_ proxy: GeometryProxy) -> Bool {
-        horizontalSizeClass == .regular && proxy.size.width > proxy.size.height
+    /// Size class alone, not the aspect ratio and not the iPad idiom. Gating on
+    /// landscape left iPad portrait falling back to the bottom sheet, which the
+    /// system draws as a centred card there - detents barely apply and it can't
+    /// be opened fully. iPad portrait still has ~600pt of map beside a panel, and
+    /// this way rotating no longer swaps between two different layouts.
+    ///
+    /// It also means the vertical strip maths below only ever runs in a compact
+    /// window, which is the tall shape it was tuned for.
+    private var usesSidePanel: Bool {
+        horizontalSizeClass == .regular
     }
 
     /// Fixed on purpose. A draggable edge meant the map's trailing inset changed
@@ -146,12 +152,12 @@ struct MainDashboardView: View {
                 // what made resizing feel abrupt. The camera maths below accounts
                 // for this one fixed value.
                 FlightPathMap(events: displayedEvents, showLines: false, mapStyle: useSatellite ? .imagery : .standard,
-                              bottomPadding: usesSidePanel(proxy) ? 0 : attributionInset(fullHeight(proxy)),
+                              bottomPadding: usesSidePanel ? 0 : attributionInset(fullHeight(proxy)),
                               selectedItemID: $selectedEventID, position: $mapPosition,
                               // Beside the map, the panel occludes the trailing edge
                               // rather than the bottom, so the attribution and the
                               // camera both need the inset over there instead.
-                              trailingPadding: usesSidePanel(proxy) ? Self.panelWidth : 0,
+                              trailingPadding: usesSidePanel ? Self.panelWidth : 0,
                               onCameraChange: { region in
                     adoptUserZoom(region.span)
                 })
@@ -213,14 +219,14 @@ struct MainDashboardView: View {
         // Beside the map in a wide window, over its bottom otherwise. Tracked in
         // state as well so the camera maths doesn't need the proxy passed to it.
         .overlay(alignment: .trailing) {
-            if usesSidePanel(proxy) { sidePanel }
+            if usesSidePanel { sidePanel }
         }
-        .onAppear { sidePanelActive = usesSidePanel(proxy) }
-        .onChange(of: usesSidePanel(proxy)) { _, isSide in
+        .onAppear { sidePanelActive = usesSidePanel }
+        .onChange(of: usesSidePanel) { _, isSide in
             sidePanelActive = isSide
             refitMap(containerHeight: fullHeight(proxy), refreshZoom: true)
         }
-        .sheet(isPresented: .constant(!usesSidePanel(proxy))) {
+        .sheet(isPresented: .constant(!usesSidePanel)) {
             DashboardSheetContent(colorScheme: _colorScheme, vehicle: vehicle, allVehicles: allVehicles, events: timelineEvents, onSelectVehicle: onSelectVehicle, newReportMonth: newReportMonth, onAcknowledgeReport: onAcknowledgeReport, selectedLogTab: $selectedLogTab, sheetDetent: $sheetDetent)
                 .presentationDetents([.fraction(0.35), .fraction(0.65), .large], selection: $sheetDetent)
                 .presentationDragIndicator(.visible).presentationBackgroundInteraction(.enabled(upThrough: .fraction(0.65))).interactiveDismissDisabled()
