@@ -500,11 +500,26 @@ struct AddFillUpView: View {
     private func resolveLocation(named name: String, latitude: Double, longitude: Double) -> GasLocation? {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty || latitude != 0 else { return nil }
+        let (lat, lon) = coordinatesForSaving(latitude: latitude, longitude: longitude)
         let candidates = (try? modelContext.fetch(FetchDescriptor<GasLocation>())) ?? []
-        if let existing = GasLocation.matching(name: trimmed, latitude: latitude, longitude: longitude, in: candidates) { return existing }
-        let loc = GasLocation(name: trimmed, latitude: latitude, longitude: longitude)
+        if let existing = GasLocation.matching(name: trimmed, latitude: lat, longitude: lon, in: candidates) { return existing }
+        let loc = GasLocation(name: trimmed, latitude: lat, longitude: lon)
         modelContext.insert(loc)
         return loc
+    }
+
+    /// Coordinates are only captured when a suggestion is tapped, so a station
+    /// name typed by hand was stored at 0,0 and never drew a pin. Falls back to
+    /// where the device is now.
+    ///
+    /// Only for a log dated today: backdating an entry and typing a name would
+    /// otherwise pin it wherever the user happens to be, which is worse than no
+    /// pin at all. An explicitly chosen suggestion always wins.
+    private func coordinatesForSaving(latitude: Double, longitude: Double) -> (Double, Double) {
+        guard latitude == 0, longitude == 0,
+              Calendar.current.isDateInToday(date),
+              let here = locationManager.location else { return (latitude, longitude) }
+        return (here.coordinate.latitude, here.coordinate.longitude)
     }
     
     private func searchNearbyChargers(center: CLLocationCoordinate2D) {
