@@ -37,6 +37,11 @@ struct FlightPathMap: View {
     var minDistance: CLLocationDistance = 0
     var topPadding: CGFloat = 0
     var horizontalPadding: CGFloat = 0
+    /// Opt in for short map cards, where a pin fitted to the edge would have its
+    /// title label clipped. Off by default because these insets also push
+    /// MapKit's own compass and scale bar inward, which looks wrong on
+    /// full-screen maps.
+    var reservesRoomForAnnotationLabels: Bool = false
 
     var body: some View {
         Map(position: $position, bounds: minDistance > 0 ? MapCameraBounds(minimumDistance: minDistance) : nil, selection: $selectedItemID) {
@@ -49,16 +54,22 @@ struct FlightPathMap: View {
             if #available(iOS 17.0, *) { UserAnnotation() }
         }
         .mapStyle(mapStyle)
-        // Floor the insets so a pin fitted to the edge still has room for its
-        // marker and the title label beneath it; otherwise the label is clipped
-        // (most visible in the short report/trip map cards). Callers asking for
-        // more, like the dashboard reserving space for its sheet, keep theirs.
-        .safeAreaPadding(EdgeInsets(
+        .safeAreaPadding(insets)
+    }
+
+    /// Insets steer where the camera frames content. When reserving room for
+    /// annotation labels they're floored so a pin fitted to the edge keeps its
+    /// title on screen.
+    private var insets: EdgeInsets {
+        guard reservesRoomForAnnotationLabels else {
+            return EdgeInsets(top: topPadding, leading: horizontalPadding, bottom: bottomPadding, trailing: horizontalPadding)
+        }
+        return EdgeInsets(
             top: max(topPadding, Self.minimumAnnotationInset),
             leading: max(horizontalPadding, Self.minimumAnnotationInset),
             bottom: max(bottomPadding, Self.minimumAnnotationLabelInset),
             trailing: max(horizontalPadding, Self.minimumAnnotationInset)
-        ))
+        )
     }
 
     /// Half the 32pt marker plus a little slack.

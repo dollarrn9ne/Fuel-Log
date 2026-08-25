@@ -150,7 +150,7 @@ struct TripDetailView: View {
                 VStack(spacing: 0) {
                     if !relevantEvents.filter({ $0.coordinate != nil }).isEmpty {
                         ZStack(alignment: .topTrailing) {
-                            FlightPathMap(events: relevantEvents, showLines: true, mapStyle: .standard, bottomPadding: 0, selectedItemID: $selectedEventID, position: .constant(.automatic))
+                            FlightPathMap(events: relevantEvents, showLines: true, mapStyle: .standard, bottomPadding: 0, selectedItemID: $selectedEventID, position: .constant(.automatic), reservesRoomForAnnotationLabels: true)
                                 .frame(height: 250).clipShape(RoundedRectangle(cornerRadius: 32, style: .continuous)).padding(.horizontal, 8).padding(.top, 8)
                                 .onChange(of: selectedEventID) { _, newID in if let id = newID, let ev = relevantEvents.first(where: { $0.id == id }) { mapEventToView = ev; selectedEventID = nil } }
                             Button { showFullScreenMap = true } label: { Image(systemName: "arrow.up.left.and.arrow.down.right").font(.subheadline.weight(.bold)).foregroundColor(.primary).padding(10).background(.regularMaterial).clipShape(Circle()).shadow(radius: 2) }.padding(16)

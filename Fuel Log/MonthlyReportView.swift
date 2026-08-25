@@ -117,7 +117,7 @@ struct MonthlyReportView: View {
                         .font(.title3.weight(.heavy))
 
                     if hasMap {
-                        FlightPathMap(events: mapEvents, showLines: false, mapStyle: .standard, bottomPadding: 0, selectedItemID: .constant(nil), position: .constant(.automatic))
+                        FlightPathMap(events: mapEvents, showLines: false, mapStyle: .standard, bottomPadding: 0, selectedItemID: .constant(nil), position: .constant(.automatic), reservesRoomForAnnotationLabels: true)
                             .frame(height: 220)
                             .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
                             .shadow(color: .black.opacity(0.1), radius: 6, y: 2)

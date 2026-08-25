@@ -58,11 +58,10 @@ struct MainDashboardView: View {
     
     /// Insets kept out of the map's usable area: room for the floating controls
     /// at the top, and a little breathing room above the sheet.
-    private static let mapTopInset: CGFloat = 80
-    /// Constant, so the camera's placement doesn't shift as the sheet resizes.
-    /// Keeping the pins clear of the sheet is handled by panning instead, which
-    /// avoids both the zoom lurch and the layout bugs an animated inset caused.
-    private static let mapBottomInset: CGFloat = 46
+    /// Clearance below the floating map buttons, used only in the camera maths.
+    /// It is deliberately not a map inset: insets also relocate MapKit's compass
+    /// and scale bar, and an animated one caused the earlier layout gaps.
+    private static let mapTopMargin: CGFloat = 80
 
     /// One curve shared by the camera move and the map's inset change. They must
     /// match: animating the camera while the usable area snaps instantly is what
@@ -99,7 +98,9 @@ struct MainDashboardView: View {
                 // the full height. `proxy.size` excludes the safe area, and
                 // pinning the map to that shorter height left a band of
                 // background along the bottom edge.
-                FlightPathMap(events: displayedEvents, showLines: false, mapStyle: useSatellite ? .imagery : .standard, bottomPadding: Self.mapBottomInset, selectedItemID: $selectedEventID, position: $mapPosition, topPadding: Self.mapTopInset, horizontalPadding: 40)
+                // No insets: the camera is positioned by pannedRegion below, and
+                // insets would also shove MapKit's compass and scale bar inward.
+                FlightPathMap(events: displayedEvents, showLines: false, mapStyle: useSatellite ? .imagery : .standard, bottomPadding: 0, selectedItemID: $selectedEventID, position: $mapPosition)
                     .transition(.opacity)
                     .onChange(of: selectedEventID) { _, newID in
                         if let id = newID, let ev = displayedEvents.first(where: { $0.id == id }) { mapEventToView = ev; selectedEventID = nil }
@@ -199,7 +200,7 @@ struct MainDashboardView: View {
         let sheetHeight = containerHeight * sheetFraction
         // Near-fully covered: nothing meaningful left to aim at, so hold still
         // rather than panning the pins away.
-        guard containerHeight - Self.mapTopInset - sheetHeight > 120 else { return }
+        guard containerHeight - Self.mapTopMargin - sheetHeight > 120 else { return }
 
         withAnimation(Self.mapReframeAnimation) {
             mapPosition = .region(pannedRegion(coords: coords, span: span, containerHeight: containerHeight, sheetHeight: sheetHeight))
@@ -219,11 +220,10 @@ struct MainDashboardView: View {
               let minLon = lons.min(), let maxLon = lons.max() else {
             return MKCoordinateSpan(latitudeDelta: 0.05, longitudeDelta: 0.05)
         }
-        let insetHeight = max(containerHeight - Self.mapTopInset - Self.mapBottomInset, 1)
-        let smallestStrip = max(containerHeight - Self.mapTopInset - containerHeight * Self.smallestSheetFraction, 1)
-        // Zoom out by however much taller the inset area is than that strip,
-        // leaving a margin so pins don't sit on the edges.
-        let scale = (insetHeight / smallestStrip) / 0.8
+        let smallestStrip = max(containerHeight - Self.mapTopMargin - containerHeight * Self.smallestSheetFraction, 1)
+        // The camera spans the whole view, so zoom out by however much taller the
+        // view is than that strip, leaving a margin so pins avoid the edges.
+        let scale = (containerHeight / smallestStrip) / 0.8
         return MKCoordinateSpan(
             latitudeDelta: max((maxLat - minLat) * scale, 0.05),
             longitudeDelta: max((maxLon - minLon) * 1.4, 0.05)
@@ -232,20 +232,20 @@ struct MainDashboardView: View {
 
     /// The pins' bounding box centred in the visible strip, at a fixed zoom.
     ///
-    /// The map's insets are constant, so the camera centre lands at the middle of
-    /// the inset area. Shifting it south by half the sheet's height lifts the
-    /// pins into the uncovered strip.
+    /// With no insets the camera centre sits at the middle of the view, so the
+    /// camera is shifted south to lift the pins into the strip the sheet leaves
+    /// uncovered.
     private func pannedRegion(coords: [CLLocationCoordinate2D], span: MKCoordinateSpan, containerHeight: CGFloat, sheetHeight: CGFloat) -> MKCoordinateRegion {
         let lats = coords.map(\.latitude), lons = coords.map(\.longitude)
         let centreLat = ((lats.min() ?? 0) + (lats.max() ?? 0)) / 2
         let centreLon = ((lons.min() ?? 0) + (lons.max() ?? 0)) / 2
 
-        let insetHeight = max(containerHeight - Self.mapTopInset - Self.mapBottomInset, 1)
-        let shiftPoints = (sheetHeight - Self.mapBottomInset) / 2
-        let degreesPerPoint = span.latitudeDelta / insetHeight
+        let viewCentre = containerHeight / 2
+        let stripCentre = (Self.mapTopMargin + (containerHeight - sheetHeight)) / 2
+        let degreesPerPoint = span.latitudeDelta / max(containerHeight, 1)
 
         return MKCoordinateRegion(
-            center: CLLocationCoordinate2D(latitude: centreLat - degreesPerPoint * shiftPoints, longitude: centreLon),
+            center: CLLocationCoordinate2D(latitude: centreLat - degreesPerPoint * (viewCentre - stripCentre), longitude: centreLon),
             span: span
         )
     }
