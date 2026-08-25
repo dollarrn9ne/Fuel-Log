@@ -42,6 +42,8 @@ struct MainDashboardView: View {
     @State private var mapPosition: MapCameraPosition = .automatic
     /// Zoom chosen when the pins last changed, held steady while the sheet moves.
     @State private var fittedSpan: MKCoordinateSpan?
+    /// Set when the sheet resizes itself for the vehicle menu rather than by a drag.
+    @State private var suppressMapPan = false
     @State private var sheetDetent: PresentationDetent = .fraction(0.35)
     @State private var selectedLogTab: LogTabChoice = .fuel
     @StateObject private var locationManager = CurrentLocationManager()
@@ -162,7 +164,7 @@ struct MainDashboardView: View {
         .onChange(of: vehicle.id) { _, _ in refitMap(containerHeight: fullHeight(proxy), refreshZoom: true) }
         .onChange(of: selectedLogTab) { _, _ in refitMap(containerHeight: fullHeight(proxy), refreshZoom: true) }
         .sheet(isPresented: .constant(true)) {
-            DashboardSheetContent(colorScheme: _colorScheme, vehicle: vehicle, allVehicles: allVehicles, events: timelineEvents, onSelectVehicle: onSelectVehicle, newReportMonth: newReportMonth, onAcknowledgeReport: onAcknowledgeReport, selectedLogTab: $selectedLogTab, sheetDetent: $sheetDetent)
+            DashboardSheetContent(colorScheme: _colorScheme, vehicle: vehicle, allVehicles: allVehicles, events: timelineEvents, onSelectVehicle: onSelectVehicle, newReportMonth: newReportMonth, onAcknowledgeReport: onAcknowledgeReport, selectedLogTab: $selectedLogTab, sheetDetent: $sheetDetent, suppressMapPan: $suppressMapPan)
                 .presentationDetents([.fraction(0.35), .fraction(0.65), .large], selection: $sheetDetent)
                 .presentationDragIndicator(.visible).presentationBackgroundInteraction(.enabled(upThrough: .fraction(0.65))).interactiveDismissDisabled()
                 .presentationBackground {
@@ -177,7 +179,10 @@ struct MainDashboardView: View {
                     }
                 }
         }
-        .onChange(of: sheetDetent) { _, _ in refitMap(containerHeight: fullHeight(proxy)) }
+        .onChange(of: sheetDetent) { _, _ in
+            guard !suppressMapPan else { suppressMapPan = false; return }
+            refitMap(containerHeight: fullHeight(proxy))
+        }
         }
     }
 
@@ -306,6 +311,8 @@ struct DashboardSheetContent: View {
     let onAcknowledgeReport: () -> Void
     @Binding var selectedLogTab: LogTabChoice
     @Binding var sheetDetent: PresentationDetent
+    /// Set when this view resizes the sheet itself, so the map doesn't also pan.
+    @Binding var suppressMapPan: Bool
     
     @State private var showingAddFillUp = false
     @State private var fillUpEntryMode: FillUpEntryMode = .fuel
@@ -392,7 +399,17 @@ struct DashboardSheetContent: View {
     
     private var headerBar: some View {
         HStack(spacing: 16) {
-            Button { if !isDropdownOpen && sheetDetent == .fraction(0.35) { sheetDetent = .fraction(0.65) }; withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) { isDropdownOpen.toggle() } } label: {
+            Button {
+                // Raising the sheet to make room for the menu would otherwise
+                // also start the map panning, and three animations at once
+                // (sheet, menu spring, map) read as a jitter. The menu covers the
+                // map anyway, so skip the pan here.
+                if !isDropdownOpen && sheetDetent == .fraction(0.35) {
+                    suppressMapPan = true
+                    sheetDetent = .fraction(0.65)
+                }
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) { isDropdownOpen.toggle() }
+            } label: {
                 HStack(spacing: 6) {
                     Text(vehicle.name).font(.title2.weight(.heavy)).foregroundColor(.primary).lineLimit(2)
                     Image(systemName: isDropdownOpen ? "chevron.up" : "chevron.down").font(.subheadline.weight(.bold)).foregroundColor(.secondary)
