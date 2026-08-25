@@ -399,17 +399,7 @@ struct DashboardSheetContent: View {
     
     private var headerBar: some View {
         HStack(spacing: 16) {
-            Button {
-                // Raising the sheet to make room for the menu would otherwise
-                // also start the map panning, and three animations at once
-                // (sheet, menu spring, map) read as a jitter. The menu covers the
-                // map anyway, so skip the pan here.
-                if !isDropdownOpen && sheetDetent == .fraction(0.35) {
-                    suppressMapPan = true
-                    sheetDetent = .fraction(0.65)
-                }
-                withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) { isDropdownOpen.toggle() }
-            } label: {
+            Button { toggleDropdown() } label: {
                 HStack(spacing: 6) {
                     Text(vehicle.name).font(.title2.weight(.heavy)).foregroundColor(.primary).lineLimit(2)
                     Image(systemName: isDropdownOpen ? "chevron.up" : "chevron.down").font(.subheadline.weight(.bold)).foregroundColor(.secondary)
@@ -567,10 +557,38 @@ struct DashboardSheetContent: View {
         }.padding(.bottom, 100)
     }
     
+    /// One curve for opening and closing. They used to differ (a spring out, the
+    /// default curve back), which made dismissing feel sluggish.
+    private static let dropdownAnimation: Animation = .spring(response: 0.3, dampingFraction: 0.85)
+
+    private func closeDropdown() {
+        withAnimation(Self.dropdownAnimation) { isDropdownOpen = false }
+    }
+
+    /// Opens the menu, first making room for it if the sheet is at its smallest.
+    ///
+    /// The resize and the menu's own animation used to run together, and the menu
+    /// laying out inside a container that was still growing is what looked like
+    /// jitter. Waiting for the resize costs a beat but is steady.
+    private func toggleDropdown() {
+        guard !isDropdownOpen else { closeDropdown(); return }
+
+        if sheetDetent == .fraction(0.35) {
+            // The menu covers the map, so panning it here would be wasted motion.
+            suppressMapPan = true
+            sheetDetent = .fraction(0.65)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                withAnimation(Self.dropdownAnimation) { isDropdownOpen = true }
+            }
+        } else {
+            withAnimation(Self.dropdownAnimation) { isDropdownOpen = true }
+        }
+    }
+
     @ViewBuilder private var dropdownMenu: some View {
         if isDropdownOpen {
             ZStack(alignment: .topLeading) {
-                Color.black.opacity(0.001).onTapGesture { withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) { isDropdownOpen = false } }
+                Color.black.opacity(0.001).onTapGesture { closeDropdown() }
                 VStack(alignment: .leading, spacing: 14) {
                     if allVehicles.count > 4 {
                         ScrollView {
@@ -580,12 +598,12 @@ struct DashboardSheetContent: View {
                         vehicleListItems
                     }
                     Divider()
-                    Button { vehicleToEdit = vehicle; withAnimation { isDropdownOpen = false } } label: { HStack(spacing: 10) { Image(systemName: "checkmark").opacity(0); Text("Edit Vehicle...") }.foregroundColor(.primary) }
-                    Button { vehicle.isArchived = true; try? modelContext.save(); withAnimation { isDropdownOpen = false }; if let newV = allVehicles.first(where: { $0.id != vehicle.id }) { onSelectVehicle(newV.id) } } label: { HStack(spacing: 10) { Image(systemName: "checkmark").opacity(0); Text("Archive Vehicle") }.foregroundColor(.primary) }
+                    Button { vehicleToEdit = vehicle; closeDropdown() } label: { HStack(spacing: 10) { Image(systemName: "checkmark").opacity(0); Text("Edit Vehicle...") }.foregroundColor(.primary) }
+                    Button { vehicle.isArchived = true; try? modelContext.save(); closeDropdown(); if let newV = allVehicles.first(where: { $0.id != vehicle.id }) { onSelectVehicle(newV.id) } } label: { HStack(spacing: 10) { Image(systemName: "checkmark").opacity(0); Text("Archive Vehicle") }.foregroundColor(.primary) }
                     Divider()
-                    Button { showingArchivedVehicles = true; withAnimation { isDropdownOpen = false } } label: { HStack(spacing: 10) { Image(systemName: "checkmark").opacity(0); Text("Archived Vehicles") }.foregroundColor(.primary) }
+                    Button { showingArchivedVehicles = true; closeDropdown() } label: { HStack(spacing: 10) { Image(systemName: "checkmark").opacity(0); Text("Archived Vehicles") }.foregroundColor(.primary) }
                     Divider()
-                    Button { showingDeleteConfirmation = true; withAnimation { isDropdownOpen = false } } label: { HStack(spacing: 10) { Image(systemName: "checkmark").opacity(0); Text("Delete Vehicle") }.foregroundColor(.red) }
+                    Button { showingDeleteConfirmation = true; closeDropdown() } label: { HStack(spacing: 10) { Image(systemName: "checkmark").opacity(0); Text("Delete Vehicle") }.foregroundColor(.red) }
                 }
                 .font(.title2.weight(.heavy)).padding(.vertical, 16).padding(.trailing, 24).padding(.leading, 12).fixedSize(horizontal: true, vertical: false)
                 .background(ZStack { RoundedRectangle(cornerRadius: 16, style: .continuous).fill(.ultraThinMaterial); RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Color.white.opacity(colorScheme == .dark ? 0.05 : 0.4)) })
@@ -598,9 +616,14 @@ struct DashboardSheetContent: View {
     private var vehicleListItems: some View {
         VStack(alignment: .leading, spacing: 14) {
             ForEach(allVehicles) { v in
-                Button { onSelectVehicle(v.id); withAnimation { isDropdownOpen = false } } label: {
+                Button { onSelectVehicle(v.id); closeDropdown() } label: {
                     HStack(spacing: 10) {
-                        Image(systemName: "checkmark").opacity(v.id == vehicle.id ? 1 : 0)
+                        Image(systemName: "checkmark")
+                            .opacity(v.id == vehicle.id ? 1 : 0)
+                            // Selecting a vehicle flips this while the menu is
+                            // being removed. Animating it cross-fades the tick
+                            // over the departing menu, so it appears to linger.
+                            .animation(nil, value: vehicle.id)
                         Text(v.name)
                     }.foregroundColor(.primary)
                 }
