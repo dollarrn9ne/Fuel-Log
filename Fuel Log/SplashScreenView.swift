@@ -71,7 +71,7 @@ struct SplashScreenView: View {
                 FeatureRow(icon: "fuelpump.fill", color: .blue, title: "Track Fuel & Efficiency", description: "Easily log your fill-ups and monitor your vehicle's fuel efficiency over time.")
                 FeatureRow(icon: "wrench.and.screwdriver.fill", color: .orange, title: "Maintenance Logs", description: "Keep a detailed history of services.")
                 FeatureRow(icon: "map.fill", color: .green, title: "Trip Tracking", description: "Record trips, categorize them, and calculate expected costs on the go.")
-            }.padding(.horizontal, 32)
+            }.padding(.horizontal, 32).centredContentColumn()
             Spacer()
             Button {
                 currentStep = 1
@@ -84,6 +84,7 @@ struct SplashScreenView: View {
                     .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
             }
             .padding(.horizontal, 24)
+            .centredContentColumn()
             .padding(.bottom, 40)
         }
     }
@@ -106,7 +107,7 @@ struct SplashScreenView: View {
                 FeatureRow(icon: "mappin.and.ellipse", color: .blue, title: "Nearby Stations", description: "Find nearby gas and service centers to easily log fill-ups and maintenance.")
                 FeatureRow(icon: "clock.arrow.circlepath", color: .orange, title: "Locate Previous Data", description: "Automatically remember and auto-fill previous locations when logging.")
                 FeatureRow(icon: "map.fill", color: .green, title: "Trip Tracking", description: "Effortlessly track your starting and ending coordinates for road trips.")
-            }.padding(.horizontal, 32)
+            }.padding(.horizontal, 32).centredContentColumn()
             Spacer()
             Button {
                 locationManager.requestLocation()
@@ -120,6 +121,7 @@ struct SplashScreenView: View {
                     .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
             }
             .padding(.horizontal, 24)
+            .centredContentColumn()
             .padding(.bottom, 40)
         }
     }

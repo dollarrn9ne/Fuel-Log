@@ -41,6 +41,24 @@ extension View {
     }
 }
 
+extension View {
+    /// Caps a centred column of content so it doesn't stretch the full width of a
+    /// roomy window. Buttons spanning ~1900pt on an iPad read as a phone layout
+    /// blown up, and a capsule that wide stops looking like a button at all.
+    ///
+    /// Harmless on iPhone, where the window is narrower than the cap anyway.
+    ///
+    /// Caps, then expands again. The second frame matters: capping alone made the
+    /// parent shrink to its widest child, since the full-width button was the only
+    /// thing keeping it greedy - which left the background as a narrow column with
+    /// bare window either side. Expanding after the cap keeps the container
+    /// full-width and centres the capped content inside it.
+    func centredContentColumn(maxWidth: CGFloat = 460) -> some View {
+        frame(maxWidth: maxWidth)
+            .frame(maxWidth: .infinity)
+    }
+}
+
 extension Double {
     var odometerString: String {
         if self == self.rounded() {

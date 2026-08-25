@@ -71,7 +71,7 @@ struct EmptyGarageView: View {
                     } message: {
                         Text("Select the app that generated your CSV.")
                     }
-                }.padding(24)
+                }.padding(24).centredContentColumn()
             }
             .navigationTitle("Garage")
             .fileImporter(isPresented: $showFileImporter, allowedContentTypes: [.commaSeparatedText]) { result in
