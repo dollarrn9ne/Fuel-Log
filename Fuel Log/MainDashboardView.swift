@@ -74,6 +74,14 @@ struct MainDashboardView: View {
         proxy.size.height + proxy.safeAreaInsets.top + proxy.safeAreaInsets.bottom
     }
 
+    /// The part of the map the camera actually frames into. The bottom inset that
+    /// keeps the Apple Maps attribution clear of the sheet also shortens the area
+    /// MapKit fits a region to, so every camera calculation measures against this
+    /// rather than the full height.
+    private func usableHeight(_ containerHeight: CGFloat) -> CGFloat {
+        max(containerHeight * (1 - Self.smallestSheetFraction), 1)
+    }
+
     /// The smallest detent offered, and the app's default.
     private static let smallestSheetFraction: CGFloat = 0.35
     /// The tallest detent the map still pans for. Beyond this so little map is
@@ -101,9 +109,16 @@ struct MainDashboardView: View {
                 // the full height. `proxy.size` excludes the safe area, and
                 // pinning the map to that shorter height left a band of
                 // background along the bottom edge.
-                // No insets: the camera is positioned by pannedRegion below, and
-                // insets would also shove MapKit's compass and scale bar inward.
-                FlightPathMap(events: displayedEvents, showLines: false, mapStyle: useSatellite ? .imagery : .standard, bottomPadding: 0, selectedItemID: $selectedEventID, position: $mapPosition, onCameraChange: { region in
+                // A bottom inset the height of the resting sheet. MapKit draws the
+                // required Apple Maps attribution in the bottom-left of the map's
+                // safe area, and with no inset the sheet sat on top of it, which
+                // App Review rejects. The inset lifts it clear.
+                //
+                // Constant rather than tracking the detent: an inset that changed
+                // as the sheet moved re-framed the camera mid-animation, which is
+                // what made resizing feel abrupt. The camera maths below accounts
+                // for this one fixed value.
+                FlightPathMap(events: displayedEvents, showLines: false, mapStyle: useSatellite ? .imagery : .standard, bottomPadding: fullHeight(proxy) * Self.smallestSheetFraction, selectedItemID: $selectedEventID, position: $mapPosition, onCameraChange: { region in
                     adoptUserZoom(region.span)
                 })
                     .transition(.opacity)
@@ -249,9 +264,9 @@ struct MainDashboardView: View {
         // on screen with the sheet raised as well as at rest. Sizing to the
         // default height fitted more tightly but hid pins once the sheet grew.
         let narrowestStrip = max(containerHeight - Self.mapTopMargin - containerHeight * Self.tallestPannedSheetFraction, 1)
-        // The camera spans the whole view, so zoom out by however much taller the
-        // view is than that strip, leaving a margin so pins avoid the edges.
-        let scale = (containerHeight / narrowestStrip) / 0.8
+        // The camera spans the usable area, so zoom out by however much taller
+        // that is than the strip, leaving a margin so pins avoid the edges.
+        let scale = (usableHeight(containerHeight) / narrowestStrip) / 0.8
         return MKCoordinateSpan(
             latitudeDelta: max((maxLat - minLat) * scale, 0.05),
             longitudeDelta: max((maxLon - minLon) * 1.4, 0.05)
@@ -260,17 +275,18 @@ struct MainDashboardView: View {
 
     /// The pins' bounding box centred in the visible strip, at a fixed zoom.
     ///
-    /// With no insets the camera centre sits at the middle of the view, so the
-    /// camera is shifted south to lift the pins into the strip the sheet leaves
-    /// uncovered.
+    /// MapKit centres the region in the usable area, which the attribution inset
+    /// ends part-way down the screen, so the camera is shifted south by whatever
+    /// is left over to lift the pins into the strip the sheet leaves uncovered.
+    /// At the resting detent the two nearly coincide and the shift is small.
     private func pannedRegion(coords: [CLLocationCoordinate2D], span: MKCoordinateSpan, containerHeight: CGFloat, sheetHeight: CGFloat) -> MKCoordinateRegion {
         let lats = coords.map(\.latitude), lons = coords.map(\.longitude)
         let centreLat = ((lats.min() ?? 0) + (lats.max() ?? 0)) / 2
         let centreLon = ((lons.min() ?? 0) + (lons.max() ?? 0)) / 2
 
-        let viewCentre = containerHeight / 2
+        let viewCentre = usableHeight(containerHeight) / 2
         let stripCentre = (Self.mapTopMargin + (containerHeight - sheetHeight)) / 2
-        let degreesPerPoint = span.latitudeDelta / max(containerHeight, 1)
+        let degreesPerPoint = span.latitudeDelta / usableHeight(containerHeight)
 
         return MKCoordinateRegion(
             center: CLLocationCoordinate2D(latitude: centreLat - degreesPerPoint * (viewCentre - stripCentre), longitude: centreLon),
