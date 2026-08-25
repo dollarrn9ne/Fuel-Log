@@ -65,6 +65,11 @@ struct MainDashboardView: View {
     /// middle of `easeInOut`, which reads badly on a zoom.
     private static let mapReframeAnimation: Animation = .smooth(duration: 0.9)
 
+    /// Full screen height including the safe areas, which `proxy.size` omits.
+    private func fullHeight(_ proxy: GeometryProxy) -> CGFloat {
+        proxy.size.height + proxy.safeAreaInsets.top + proxy.safeAreaInsets.bottom
+    }
+
     /// How much of the screen the bottom sheet currently covers. `PresentationDetent`
     /// doesn't expose its fraction, so map the known detents back to their values.
     private var sheetFraction: CGFloat {
@@ -81,16 +86,13 @@ struct MainDashboardView: View {
                 // Keep the map's usable area in step with the sheet: a fixed inset
                 // let the "fit all pins" region extend underneath the sheet, so
                 // pins bunched up along the bottom edge and out of sight.
-                let sheetHeight = proxy.size.height * sheetFraction
+                //
+                // Detent fractions are of the whole screen, so measure against
+                // the full height. `proxy.size` excludes the safe area, and
+                // pinning the map to that shorter height left a band of
+                // background along the bottom edge.
+                let sheetHeight = fullHeight(proxy) * sheetFraction
                 FlightPathMap(events: displayedEvents, showLines: false, mapStyle: useSatellite ? .imagery : .standard, bottomPadding: sheetHeight + Self.mapBottomMargin, selectedItemID: $selectedEventID, position: $mapPosition, topPadding: Self.mapTopInset, horizontalPadding: 40)
-                    // The map must always fill the screen behind the sheet. The
-                    // insets only steer where the camera frames content; without
-                    // pinning the frame, a changing bottom inset can shrink the
-                    // map and let the background show through as a band above
-                    // the sheet. Applied here rather than inside FlightPathMap,
-                    // which is also used in fixed-height cards.
-                    .frame(width: proxy.size.width, height: proxy.size.height)
-                    .ignoresSafeArea()
                     .transition(.opacity)
                     .onChange(of: selectedEventID) { _, newID in
                         if let id = newID, let ev = displayedEvents.first(where: { $0.id == id }) { mapEventToView = ev; selectedEventID = nil }
@@ -156,7 +158,7 @@ struct MainDashboardView: View {
                     }
                 }
         }
-        .onChange(of: sheetDetent) { _, _ in refitMap(containerHeight: proxy.size.height) }
+        .onChange(of: sheetDetent) { _, _ in refitMap(containerHeight: fullHeight(proxy)) }
         }
     }
 
