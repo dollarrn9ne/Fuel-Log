@@ -42,8 +42,6 @@ struct MainDashboardView: View {
     @State private var mapPosition: MapCameraPosition = .automatic
     /// Zoom chosen when the pins last changed, held steady while the sheet moves.
     @State private var fittedSpan: MKCoordinateSpan?
-    /// Set when the sheet resizes itself for the vehicle menu rather than by a drag.
-    @State private var suppressMapPan = false
     @State private var sheetDetent: PresentationDetent = .fraction(0.35)
     @State private var selectedLogTab: LogTabChoice = .fuel
     @StateObject private var locationManager = CurrentLocationManager()
@@ -164,7 +162,7 @@ struct MainDashboardView: View {
         .onChange(of: vehicle.id) { _, _ in refitMap(containerHeight: fullHeight(proxy), refreshZoom: true) }
         .onChange(of: selectedLogTab) { _, _ in refitMap(containerHeight: fullHeight(proxy), refreshZoom: true) }
         .sheet(isPresented: .constant(true)) {
-            DashboardSheetContent(colorScheme: _colorScheme, vehicle: vehicle, allVehicles: allVehicles, events: timelineEvents, onSelectVehicle: onSelectVehicle, newReportMonth: newReportMonth, onAcknowledgeReport: onAcknowledgeReport, selectedLogTab: $selectedLogTab, sheetDetent: $sheetDetent, suppressMapPan: $suppressMapPan)
+            DashboardSheetContent(colorScheme: _colorScheme, vehicle: vehicle, allVehicles: allVehicles, events: timelineEvents, onSelectVehicle: onSelectVehicle, newReportMonth: newReportMonth, onAcknowledgeReport: onAcknowledgeReport, selectedLogTab: $selectedLogTab, sheetDetent: $sheetDetent)
                 .presentationDetents([.fraction(0.35), .fraction(0.65), .large], selection: $sheetDetent)
                 .presentationDragIndicator(.visible).presentationBackgroundInteraction(.enabled(upThrough: .fraction(0.65))).interactiveDismissDisabled()
                 .presentationBackground {
@@ -180,7 +178,6 @@ struct MainDashboardView: View {
                 }
         }
         .onChange(of: sheetDetent) { _, _ in
-            guard !suppressMapPan else { suppressMapPan = false; return }
             refitMap(containerHeight: fullHeight(proxy))
         }
         }
@@ -311,8 +308,6 @@ struct DashboardSheetContent: View {
     let onAcknowledgeReport: () -> Void
     @Binding var selectedLogTab: LogTabChoice
     @Binding var sheetDetent: PresentationDetent
-    /// Set when this view resizes the sheet itself, so the map doesn't also pan.
-    @Binding var suppressMapPan: Bool
     
     @State private var showingAddFillUp = false
     @State private var fillUpEntryMode: FillUpEntryMode = .fuel
@@ -325,7 +320,6 @@ struct DashboardSheetContent: View {
     @State private var showingCharts = false
     @State private var showingMonthlyReport = false
     @State private var monthlyReportMonth = Date()
-    @State private var isDropdownOpen = false
     @State private var eventToEdit: VehicleEvent?
     @State private var vehicleToEdit: Vehicle?
     @State private var vehicleShareItem: VehicleShareItem?
@@ -383,7 +377,6 @@ struct DashboardSheetContent: View {
                 }
             }
         }
-        .overlay(alignment: .topLeading) { dropdownMenu }
         .sheet(isPresented: $showingAddFillUp) { NavigationStack { AddFillUpView(vehicle: vehicle, entryMode: fillUpEntryMode) } }
         .sheet(isPresented: $showingAddService) { NavigationStack { AddServiceView(vehicle: vehicle) } }
         .sheet(item: $eventToEdit) { ev in NavigationStack { switch ev { case .fillUp(let f): AddFillUpView(vehicle: vehicle, editingFillUp: f); case .service(let s): AddServiceView(vehicle: vehicle, editingService: s) } } }
@@ -399,10 +392,33 @@ struct DashboardSheetContent: View {
     
     private var headerBar: some View {
         HStack(spacing: 16) {
-            Button { toggleDropdown() } label: {
+            // A system Menu rather than a hand-rolled overlay: it renders outside
+            // the sheet, so it needs no room made for it and can't be caught up
+            // in the sheet's own animation, which is what made the old one
+            // stutter. The system also owns the selection tick and dismissal.
+            Menu {
+                Picker("Vehicle", selection: Binding(
+                    get: { vehicle.id },
+                    set: { onSelectVehicle($0) }
+                )) {
+                    ForEach(allVehicles) { v in
+                        Text(v.name).tag(v.id)
+                    }
+                }
+                Section {
+                    Button { vehicleToEdit = vehicle } label: { Label("Edit Vehicle...", systemImage: "pencil") }
+                    Button { archiveCurrentVehicle() } label: { Label("Archive Vehicle", systemImage: "archivebox") }
+                }
+                Section {
+                    Button { showingArchivedVehicles = true } label: { Label("Archived Vehicles", systemImage: "tray.full") }
+                }
+                Section {
+                    Button(role: .destructive) { showingDeleteConfirmation = true } label: { Label("Delete Vehicle", systemImage: "trash") }
+                }
+            } label: {
                 HStack(spacing: 6) {
                     Text(vehicle.name).font(.title2.weight(.heavy)).foregroundColor(.primary).lineLimit(2)
-                    Image(systemName: isDropdownOpen ? "chevron.up" : "chevron.down").font(.subheadline.weight(.bold)).foregroundColor(.secondary)
+                    Image(systemName: "chevron.down").font(.subheadline.weight(.bold)).foregroundColor(.secondary)
                 }
             }.frame(maxWidth: .infinity, alignment: .leading)
             
@@ -557,79 +573,15 @@ struct DashboardSheetContent: View {
         }.padding(.bottom, 100)
     }
     
-    /// One curve for opening and closing. They used to differ (a spring out, the
-    /// default curve back), which made dismissing feel sluggish.
-    private static let dropdownAnimation: Animation = .spring(response: 0.3, dampingFraction: 0.85)
-
-    private func closeDropdown() {
-        withAnimation(Self.dropdownAnimation) { isDropdownOpen = false }
-    }
-
-    /// Opens the menu, first making room for it if the sheet is at its smallest.
-    ///
-    /// The resize and the menu's own animation used to run together, and the menu
-    /// laying out inside a container that was still growing is what looked like
-    /// jitter. Waiting for the resize costs a beat but is steady.
-    private func toggleDropdown() {
-        guard !isDropdownOpen else { closeDropdown(); return }
-
-        if sheetDetent == .fraction(0.35) {
-            // The menu covers the map, so panning it here would be wasted motion.
-            suppressMapPan = true
-            sheetDetent = .fraction(0.65)
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                withAnimation(Self.dropdownAnimation) { isDropdownOpen = true }
-            }
-        } else {
-            withAnimation(Self.dropdownAnimation) { isDropdownOpen = true }
+    /// Archives the current vehicle and moves to another, if there is one.
+    private func archiveCurrentVehicle() {
+        vehicle.isArchived = true
+        try? modelContext.save()
+        if let next = allVehicles.first(where: { $0.id != vehicle.id }) {
+            onSelectVehicle(next.id)
         }
     }
 
-    @ViewBuilder private var dropdownMenu: some View {
-        if isDropdownOpen {
-            ZStack(alignment: .topLeading) {
-                Color.black.opacity(0.001).onTapGesture { closeDropdown() }
-                VStack(alignment: .leading, spacing: 14) {
-                    if allVehicles.count > 4 {
-                        ScrollView {
-                            vehicleListItems
-                        }.frame(maxHeight: 250).scrollIndicators(.hidden)
-                    } else {
-                        vehicleListItems
-                    }
-                    Divider()
-                    Button { vehicleToEdit = vehicle; closeDropdown() } label: { HStack(spacing: 10) { Image(systemName: "checkmark").opacity(0); Text("Edit Vehicle...") }.foregroundColor(.primary) }
-                    Button { vehicle.isArchived = true; try? modelContext.save(); closeDropdown(); if let newV = allVehicles.first(where: { $0.id != vehicle.id }) { onSelectVehicle(newV.id) } } label: { HStack(spacing: 10) { Image(systemName: "checkmark").opacity(0); Text("Archive Vehicle") }.foregroundColor(.primary) }
-                    Divider()
-                    Button { showingArchivedVehicles = true; closeDropdown() } label: { HStack(spacing: 10) { Image(systemName: "checkmark").opacity(0); Text("Archived Vehicles") }.foregroundColor(.primary) }
-                    Divider()
-                    Button { showingDeleteConfirmation = true; closeDropdown() } label: { HStack(spacing: 10) { Image(systemName: "checkmark").opacity(0); Text("Delete Vehicle") }.foregroundColor(.red) }
-                }
-                .font(.title2.weight(.heavy)).padding(.vertical, 16).padding(.trailing, 24).padding(.leading, 12).fixedSize(horizontal: true, vertical: false)
-                .background(ZStack { RoundedRectangle(cornerRadius: 16, style: .continuous).fill(.ultraThinMaterial); RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Color.white.opacity(colorScheme == .dark ? 0.05 : 0.4)) })
-                .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(LinearGradient(colors: [Color.white.opacity(colorScheme == .dark ? 0.3 : 0.8), Color.white.opacity(colorScheme == .dark ? 0.05 : 0.2)], startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 0.5))
-                .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.5 : 0.15), radius: 20, x: 0, y: 10).padding(.top, 64).padding(.leading, 24).transition(.scale(scale: 0.95, anchor: .topLeading).combined(with: .opacity))
-            }.zIndex(20)
-        }
-    }
-    
-    private var vehicleListItems: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            ForEach(allVehicles) { v in
-                Button { onSelectVehicle(v.id); closeDropdown() } label: {
-                    HStack(spacing: 10) {
-                        Image(systemName: "checkmark")
-                            .opacity(v.id == vehicle.id ? 1 : 0)
-                            // Selecting a vehicle flips this while the menu is
-                            // being removed. Animating it cross-fades the tick
-                            // over the departing menu, so it appears to linger.
-                            .animation(nil, value: vehicle.id)
-                        Text(v.name)
-                    }.foregroundColor(.primary)
-                }
-            }
-        }.padding(.vertical, 4)
-    }
     
     private func deleteEvent(_ vehicleToDelete: Vehicle) {
         modelContext.delete(vehicleToDelete)
