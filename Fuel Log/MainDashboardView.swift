@@ -74,12 +74,23 @@ struct MainDashboardView: View {
         proxy.size.height + proxy.safeAreaInsets.top + proxy.safeAreaInsets.bottom
     }
 
+    /// MapKit leaves its own margin above the inset before drawing the Apple Maps
+    /// attribution, which left it floating well clear of the sheet. Trimming the
+    /// inset by roughly that margin settles it just above the sheet's top edge.
+    private static let attributionDrop: CGFloat = 36
+
+    /// Bottom inset applied to the map, sized so the attribution clears the sheet
+    /// at its resting height without sitting any higher than it needs to.
+    private func attributionInset(_ containerHeight: CGFloat) -> CGFloat {
+        max(containerHeight * Self.smallestSheetFraction - Self.attributionDrop, 0)
+    }
+
     /// The part of the map the camera actually frames into. The bottom inset that
-    /// keeps the Apple Maps attribution clear of the sheet also shortens the area
-    /// MapKit fits a region to, so every camera calculation measures against this
-    /// rather than the full height.
+    /// keeps the attribution clear of the sheet also shortens the area MapKit fits
+    /// a region to, so every camera calculation measures against this rather than
+    /// the full height.
     private func usableHeight(_ containerHeight: CGFloat) -> CGFloat {
-        max(containerHeight * (1 - Self.smallestSheetFraction), 1)
+        max(containerHeight - attributionInset(containerHeight), 1)
     }
 
     /// The smallest detent offered, and the app's default.
@@ -118,7 +129,7 @@ struct MainDashboardView: View {
                 // as the sheet moved re-framed the camera mid-animation, which is
                 // what made resizing feel abrupt. The camera maths below accounts
                 // for this one fixed value.
-                FlightPathMap(events: displayedEvents, showLines: false, mapStyle: useSatellite ? .imagery : .standard, bottomPadding: fullHeight(proxy) * Self.smallestSheetFraction, selectedItemID: $selectedEventID, position: $mapPosition, onCameraChange: { region in
+                FlightPathMap(events: displayedEvents, showLines: false, mapStyle: useSatellite ? .imagery : .standard, bottomPadding: attributionInset(fullHeight(proxy)), selectedItemID: $selectedEventID, position: $mapPosition, onCameraChange: { region in
                     adoptUserZoom(region.span)
                 })
                     .transition(.opacity)
