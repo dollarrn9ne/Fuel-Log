@@ -49,8 +49,22 @@ struct FlightPathMap: View {
             if #available(iOS 17.0, *) { UserAnnotation() }
         }
         .mapStyle(mapStyle)
-        .safeAreaPadding(EdgeInsets(top: topPadding, leading: horizontalPadding, bottom: bottomPadding, trailing: horizontalPadding))
+        // Floor the insets so a pin fitted to the edge still has room for its
+        // marker and the title label beneath it; otherwise the label is clipped
+        // (most visible in the short report/trip map cards). Callers asking for
+        // more, like the dashboard reserving space for its sheet, keep theirs.
+        .safeAreaPadding(EdgeInsets(
+            top: max(topPadding, Self.minimumAnnotationInset),
+            leading: max(horizontalPadding, Self.minimumAnnotationInset),
+            bottom: max(bottomPadding, Self.minimumAnnotationLabelInset),
+            trailing: max(horizontalPadding, Self.minimumAnnotationInset)
+        ))
     }
+
+    /// Half the 32pt marker plus a little slack.
+    private static let minimumAnnotationInset: CGFloat = 28
+    /// Marker plus the title label that draws underneath it.
+    private static let minimumAnnotationLabelInset: CGFloat = 46
 }
 
 // MARK: - Stats Grid
