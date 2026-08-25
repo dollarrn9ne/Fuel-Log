@@ -76,6 +76,9 @@ struct MainDashboardView: View {
 
     /// The smallest detent offered, and the app's default.
     private static let smallestSheetFraction: CGFloat = 0.35
+    /// The tallest detent the map still pans for. Beyond this so little map is
+    /// left that panning is skipped, so it doesn't constrain the zoom.
+    private static let tallestPannedSheetFraction: CGFloat = 0.65
 
     /// How much of the screen the bottom sheet currently covers. `PresentationDetent`
     /// doesn't expose its fraction, so map the known detents back to their values.
@@ -123,13 +126,6 @@ struct MainDashboardView: View {
                                 locationManager.requestLocation()
                             }
                         } label: { Image(systemName: "location.fill").font(.title3).foregroundColor(.primary).padding(12).background(.regularMaterial).clipShape(Circle()).shadow(radius: 2) }
-
-                        Button { zoomMap(by: 0.5, containerHeight: fullHeight(proxy)) } label: {
-                            Image(systemName: "plus").font(.title3).foregroundColor(.primary).padding(12).background(.regularMaterial).clipShape(Circle()).shadow(radius: 2)
-                        }.accessibilityLabel("Zoom in")
-                        Button { zoomMap(by: 2, containerHeight: fullHeight(proxy)) } label: {
-                            Image(systemName: "minus").font(.title3).foregroundColor(.primary).padding(12).background(.regularMaterial).clipShape(Circle()).shadow(radius: 2)
-                        }.accessibilityLabel("Zoom out")
                     }.padding().opacity(isMapReady ? 1 : 0)
                 }
                 Spacer()
@@ -219,34 +215,19 @@ struct MainDashboardView: View {
     /// Records a zoom the user reached by pinching, so the next sheet drag pans
     /// from there rather than snapping back.
     ///
-    /// This fires for our own programmatic moves too, and MapKit adjusts the span
-    /// it reports to the view's aspect ratio. Adopting every report would let
-    /// that adjustment feed back into the next pan and drift the zoom, so only
-    /// clearly deliberate changes are taken.
+    /// Ignored until we've set our own zoom: this also fires for MapKit's initial
+    /// automatic fit, which frames the pins against the whole view and therefore
+    /// tucks the lower ones behind the sheet. Adopting that defeated the point of
+    /// choosing a zoom at all.
+    ///
+    /// Our own programmatic pans report back too, with the span adjusted to the
+    /// view's aspect ratio, so only clearly deliberate changes are taken;
+    /// otherwise that adjustment would feed into the next pan and drift the zoom.
     private func adoptUserZoom(_ span: MKCoordinateSpan) {
-        guard let current = fittedSpan else { fittedSpan = span; return }
+        guard let current = fittedSpan else { return }
         let ratio = span.latitudeDelta / max(current.latitudeDelta, .leastNonzeroMagnitude)
         guard ratio < 0.9 || ratio > 1.1 else { return }
         fittedSpan = span
-    }
-
-    /// Scales the zoom about the pins. `factor` below 1 zooms in, above 1 out.
-    private func zoomMap(by factor: Double, containerHeight: CGFloat) {
-        let coords = displayedEvents.compactMap(\.coordinate)
-        guard !coords.isEmpty, containerHeight > 0 else { return }
-
-        let current = fittedSpan ?? fittingSpan(for: coords, containerHeight: containerHeight)
-        // Clamp to MapKit's usable range so repeated taps can't wrap around.
-        let span = MKCoordinateSpan(
-            latitudeDelta: min(max(current.latitudeDelta * factor, 0.002), 120),
-            longitudeDelta: min(max(current.longitudeDelta * factor, 0.002), 120)
-        )
-        fittedSpan = span
-
-        let sheetHeight = containerHeight * sheetFraction
-        withAnimation(Self.mapReframeAnimation) {
-            mapPosition = .region(pannedRegion(coords: coords, span: span, containerHeight: containerHeight, sheetHeight: sheetHeight))
-        }
     }
 
     /// A span containing every coordinate, floored so a single pin doesn't zoom
@@ -262,10 +243,13 @@ struct MainDashboardView: View {
               let minLon = lons.min(), let maxLon = lons.max() else {
             return MKCoordinateSpan(latitudeDelta: 0.05, longitudeDelta: 0.05)
         }
-        let smallestStrip = max(containerHeight - Self.mapTopMargin - containerHeight * Self.smallestSheetFraction, 1)
+        // Size against the *narrowest* strip we still pan for, so the pins stay
+        // on screen with the sheet raised as well as at rest. Sizing to the
+        // default height fitted more tightly but hid pins once the sheet grew.
+        let narrowestStrip = max(containerHeight - Self.mapTopMargin - containerHeight * Self.tallestPannedSheetFraction, 1)
         // The camera spans the whole view, so zoom out by however much taller the
         // view is than that strip, leaving a margin so pins avoid the edges.
-        let scale = (containerHeight / smallestStrip) / 0.8
+        let scale = (containerHeight / narrowestStrip) / 0.8
         return MKCoordinateSpan(
             latitudeDelta: max((maxLat - minLat) * scale, 0.05),
             longitudeDelta: max((maxLon - minLon) * 1.4, 0.05)
