@@ -47,9 +47,6 @@ struct MainDashboardView: View {
     @StateObject private var locationManager = CurrentLocationManager()
     @State private var isMapReady = false
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
-    /// Width of the side panel in wide windows, adjustable by dragging its edge.
-    @State private var panelWidth: CGFloat = 420
-    @State private var panelDragStartWidth: CGFloat?
     @State private var sidePanelActive = false
     
     var timelineEvents: [VehicleEvent] {
@@ -121,8 +118,10 @@ struct MainDashboardView: View {
         horizontalSizeClass == .regular && proxy.size.width > proxy.size.height
     }
 
-    private static let minimumPanelWidth: CGFloat = 340
-    private static let maximumPanelWidth: CGFloat = 620
+    /// Fixed on purpose. A draggable edge meant the map's trailing inset changed
+    /// on every gesture update, and re-framing the camera that often made the
+    /// whole screen jitter.
+    private static let panelWidth: CGFloat = 420
 
     var body: some View {
         GeometryReader { proxy in
@@ -152,7 +151,7 @@ struct MainDashboardView: View {
                               // Beside the map, the panel occludes the trailing edge
                               // rather than the bottom, so the attribution and the
                               // camera both need the inset over there instead.
-                              trailingPadding: usesSidePanel(proxy) ? panelWidth : 0,
+                              trailingPadding: usesSidePanel(proxy) ? Self.panelWidth : 0,
                               onCameraChange: { region in
                     adoptUserZoom(region.span)
                 })
@@ -256,41 +255,13 @@ struct MainDashboardView: View {
     /// move no easing curve can make feel gentle. Panning is a small move, so it
     /// reads as smooth. Pass `refreshZoom` when the content itself changed and a
     /// new zoom is warranted.
-    /// Full-height panel pinned to the trailing edge, with a draggable leading
-    /// edge. Nothing is hidden behind a detent here, so every row is reachable by
-    /// scrolling rather than by opening the panel further.
+    /// Full-height panel pinned to the trailing edge. Nothing is hidden behind a
+    /// detent here, so every row is reachable by scrolling.
     private var sidePanel: some View {
-        HStack(spacing: 0) {
-            panelResizeHandle
-            DashboardSheetContent(colorScheme: _colorScheme, vehicle: vehicle, allVehicles: allVehicles, events: timelineEvents, onSelectVehicle: onSelectVehicle, newReportMonth: newReportMonth, onAcknowledgeReport: onAcknowledgeReport, selectedLogTab: $selectedLogTab, sheetDetent: .constant(.large))
-                .frame(width: panelWidth)
-                .background(.regularMaterial)
-        }
-        .transition(.move(edge: .trailing))
-    }
-
-    private var panelResizeHandle: some View {
-        Rectangle()
-            .fill(Color.clear)
-            .frame(width: 18)
-            .overlay {
-                Capsule()
-                    .fill(.secondary.opacity(0.5))
-                    .frame(width: 5, height: 44)
-            }
-            .contentShape(Rectangle())
-            .gesture(
-                DragGesture()
-                    .onChanged { value in
-                        // Anchor to the width the drag began at, otherwise each
-                        // update compounds the last one and the panel races away.
-                        let start = panelDragStartWidth ?? panelWidth
-                        panelDragStartWidth = start
-                        panelWidth = min(max(start - value.translation.width, Self.minimumPanelWidth), Self.maximumPanelWidth)
-                    }
-                    .onEnded { _ in panelDragStartWidth = nil }
-            )
-            .accessibilityLabel("Resize panel")
+        DashboardSheetContent(colorScheme: _colorScheme, vehicle: vehicle, allVehicles: allVehicles, events: timelineEvents, onSelectVehicle: onSelectVehicle, newReportMonth: newReportMonth, onAcknowledgeReport: onAcknowledgeReport, selectedLogTab: $selectedLogTab, sheetDetent: .constant(.large))
+            .frame(width: Self.panelWidth)
+            .background(.regularMaterial)
+            .transition(.move(edge: .trailing))
     }
 
     private func refitMap(containerHeight: CGFloat, refreshZoom: Bool = false) {
