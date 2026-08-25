@@ -59,6 +59,12 @@ struct MainDashboardView: View {
     private static let mapTopInset: CGFloat = 80
     private static let mapBottomMargin: CGFloat = 24
 
+    /// One curve shared by the camera move and the map's inset change. They must
+    /// match: animating the camera while the usable area snaps instantly is what
+    /// made resizing the sheet feel abrupt. `smooth` eases out without the fast
+    /// middle of `easeInOut`, which reads badly on a zoom.
+    private static let mapReframeAnimation: Animation = .smooth(duration: 0.9)
+
     /// How much of the screen the bottom sheet currently covers. `PresentationDetent`
     /// doesn't expose its fraction, so map the known detents back to their values.
     private var sheetFraction: CGFloat {
@@ -77,6 +83,8 @@ struct MainDashboardView: View {
                 // pins bunched up along the bottom edge and out of sight.
                 let sheetHeight = proxy.size.height * sheetFraction
                 FlightPathMap(events: displayedEvents, showLines: false, mapStyle: useSatellite ? .imagery : .standard, bottomPadding: sheetHeight + Self.mapBottomMargin, selectedItemID: $selectedEventID, position: $mapPosition, topPadding: Self.mapTopInset, horizontalPadding: 40)
+                    // Ease the inset in step with the camera instead of snapping.
+                    .animation(Self.mapReframeAnimation, value: sheetDetent)
                     .transition(.opacity)
                     .onChange(of: selectedEventID) { _, newID in
                         if let id = newID, let ev = displayedEvents.first(where: { $0.id == id }) { mapEventToView = ev; selectedEventID = nil }
@@ -162,7 +170,7 @@ struct MainDashboardView: View {
         // sliver blows the zoom out to nothing. Leave the camera as it is.
         guard visibleHeight > 120 else { return }
 
-        withAnimation(.easeInOut(duration: 0.5)) {
+        withAnimation(Self.mapReframeAnimation) {
             mapPosition = .region(region(fitting: coords))
         }
     }
