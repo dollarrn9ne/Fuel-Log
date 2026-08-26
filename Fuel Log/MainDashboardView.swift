@@ -586,16 +586,16 @@ struct DashboardSheetContent: View {
                 }
             }
         }
-        .sheet(isPresented: $showingAddFillUp) { NavigationStack { AddFillUpView(vehicle: vehicle, entryMode: fillUpEntryMode) } }
-        .sheet(isPresented: $showingAddService) { NavigationStack { AddServiceView(vehicle: vehicle) } }
-        .sheet(item: $eventToEdit) { ev in NavigationStack { switch ev { case .fillUp(let f): AddFillUpView(vehicle: vehicle, editingFillUp: f); case .service(let s): AddServiceView(vehicle: vehicle, editingService: s) } } }
-        .sheet(isPresented: $showingAddVehicle) { NavigationStack { AddVehicleView() } }
-        .sheet(item: $vehicleToEdit) { v in NavigationStack { AddVehicleView(editingVehicle: v) } }
-        .sheet(isPresented: $showingArchivedVehicles) { ArchivedVehiclesView() }
-        .sheet(isPresented: $showingCharts) { VehicleChartsView(vehicle: vehicle) }
+        .sheet(isPresented: $showingAddFillUp) { NavigationStack { AddFillUpView(vehicle: vehicle, entryMode: fillUpEntryMode) }.roomySheetOnPad() }
+        .sheet(isPresented: $showingAddService) { NavigationStack { AddServiceView(vehicle: vehicle) }.roomySheetOnPad() }
+        .sheet(item: $eventToEdit) { ev in NavigationStack { switch ev { case .fillUp(let f): AddFillUpView(vehicle: vehicle, editingFillUp: f); case .service(let s): AddServiceView(vehicle: vehicle, editingService: s) } }.roomySheetOnPad() }
+        .sheet(isPresented: $showingAddVehicle) { NavigationStack { AddVehicleView() }.roomySheetOnPad() }
+        .sheet(item: $vehicleToEdit) { v in NavigationStack { AddVehicleView(editingVehicle: v) }.roomySheetOnPad() }
+        .sheet(isPresented: $showingArchivedVehicles) { ArchivedVehiclesView().roomySheetOnPad() }
+        .sheet(isPresented: $showingCharts) { VehicleChartsView(vehicle: vehicle).roomySheetOnPad() }
         .alert("Delete \(vehicle.name)?", isPresented: $showingDeleteConfirmation) { Button("Cancel", role: .cancel) {}; Button("Delete", role: .destructive) { deleteEvent(vehicle) } } message: { Text("This will permanently delete this vehicle and all logs.") }
         .fullScreenCover(isPresented: $showingTrips) { NavigationStack { TripsListView(vehicle: vehicle) } }
-        .sheet(isPresented: $showingMonthlyReport) { NavigationStack { MonthlyReportView(month: monthlyReportMonth, isModal: true) } }
+        .sheet(isPresented: $showingMonthlyReport) { NavigationStack { MonthlyReportView(month: monthlyReportMonth, isModal: true) }.roomySheetOnPad() }
         .fullScreenCover(isPresented: $showingSettings) { NavigationStack { SettingsView() } }
     }
     

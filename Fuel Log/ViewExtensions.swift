@@ -59,6 +59,17 @@ extension View {
     }
 }
 
+extension View {
+    /// Sheets default to a small form size on iPad, which crops a long form part
+    /// way down and leaves it looking cramped and boxed in. Page sizing gives it
+    /// room to breathe.
+    ///
+    /// No effect on iPhone, where a sheet fills the width regardless.
+    func roomySheetOnPad() -> some View {
+        presentationSizing(.page)
+    }
+}
+
 extension Double {
     var odometerString: String {
         if self == self.rounded() {
