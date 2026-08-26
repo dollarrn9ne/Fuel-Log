@@ -47,7 +47,10 @@ struct MainDashboardView: View {
     @StateObject private var locationManager = CurrentLocationManager()
     @State private var isMapReady = false
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
-    @State private var sidePanelActive = false
+    @State private var layoutMode: DashboardLayout = .bottomSheet
+
+    /// Where the dashboard content sits relative to the map.
+    private enum DashboardLayout { case bottomSheet, sidePanel, bottomPanel }
     
     var timelineEvents: [VehicleEvent] {
         let fills = (vehicle.fillUps ?? []).map(VehicleEvent.fillUp), svcs = (vehicle.services ?? []).map(VehicleEvent.service)
@@ -84,7 +87,11 @@ struct MainDashboardView: View {
     /// Bottom inset applied to the map, sized so the attribution clears the sheet
     /// at its resting height without sitting any higher than it needs to.
     private func attributionInset(_ containerHeight: CGFloat) -> CGFloat {
-        max(containerHeight * Self.smallestSheetFraction - Self.attributionDrop, 0)
+        // The drop is calibrated against the sheet, where MapKit's own margin left
+        // the logo floating well clear. Under the portrait panel that same trim
+        // pushes it back under the panel's top edge, so inset by the full height.
+        let drop = layoutMode == .bottomPanel ? 0 : Self.attributionDrop
+        return max(containerHeight * restingOccludedFraction - drop, 0)
     }
 
     /// The part of the map the camera actually frames into. The bottom inset that
@@ -109,19 +116,38 @@ struct MainDashboardView: View {
         return Self.smallestSheetFraction
     }
 
-    /// In a roomy window the panel sits beside the map instead of over it, so it
-    /// gets the full height and every row is reachable by scrolling.
+    /// A roomy window puts the content beside the map in landscape, where there's
+    /// width to spare, and along the bottom in portrait, where there isn't.
     ///
-    /// Size class alone, not the aspect ratio and not the iPad idiom. Gating on
-    /// landscape left iPad portrait falling back to the bottom sheet, which the
-    /// system draws as a centred card there - detents barely apply and it can't
-    /// be opened fully. iPad portrait still has ~600pt of map beside a panel, and
-    /// this way rotating no longer swaps between two different layouts.
-    ///
-    /// It also means the vertical strip maths below only ever runs in a compact
-    /// window, which is the tall shape it was tuned for.
-    private var usesSidePanel: Bool {
-        horizontalSizeClass == .regular
+    /// Portrait gets an inline panel rather than the system sheet: at regular
+    /// width iOS draws a sheet as a centred card of fixed width, floating well up
+    /// the screen. An inline panel is the only way to get one that spans the full
+    /// width and sits on the bottom edge.
+    private func layout(_ proxy: GeometryProxy) -> DashboardLayout {
+        guard horizontalSizeClass == .regular else { return .bottomSheet }
+        return proxy.size.width > proxy.size.height ? .sidePanel : .bottomPanel
+    }
+
+    /// Height of the iPad portrait panel. Fixed: it has no detents, so there is
+    /// nothing to drag and nothing to re-frame the camera mid-gesture.
+    private static let bottomPanelFraction: CGFloat = 0.45
+
+    /// Share of the height covered by whatever sits over the map's bottom. The
+    /// portrait panel doesn't move, so unlike the sheet it's a constant.
+    private var occludedFraction: CGFloat {
+        layoutMode == .bottomPanel ? Self.bottomPanelFraction : sheetFraction
+    }
+
+    /// The occlusion at rest, which is what the attribution has to clear.
+    private var restingOccludedFraction: CGFloat {
+        layoutMode == .bottomPanel ? Self.bottomPanelFraction : Self.smallestSheetFraction
+    }
+
+    /// The most the map is ever covered in this layout, which is what the zoom has
+    /// to keep pins clear of. The portrait panel has no detents, so it never grows
+    /// past its own height and doesn't need the sheet's worst case.
+    private var tallestOccludedFraction: CGFloat {
+        layoutMode == .bottomPanel ? Self.bottomPanelFraction : Self.tallestPannedSheetFraction
     }
 
     /// Fixed on purpose. A draggable edge meant the map's trailing inset changed
@@ -152,12 +178,12 @@ struct MainDashboardView: View {
                 // what made resizing feel abrupt. The camera maths below accounts
                 // for this one fixed value.
                 FlightPathMap(events: displayedEvents, showLines: false, mapStyle: useSatellite ? .imagery : .standard,
-                              bottomPadding: usesSidePanel ? 0 : attributionInset(fullHeight(proxy)),
+                              bottomPadding: layout(proxy) == .sidePanel ? 0 : attributionInset(fullHeight(proxy)),
                               selectedItemID: $selectedEventID, position: $mapPosition,
                               // Beside the map, the panel occludes the trailing edge
                               // rather than the bottom, so the attribution and the
                               // camera both need the inset over there instead.
-                              trailingPadding: usesSidePanel ? Self.panelWidth : 0,
+                              trailingPadding: layout(proxy) == .sidePanel ? Self.panelWidth : 0,
                               onCameraChange: { region in
                     adoptUserZoom(region.span)
                 })
@@ -216,17 +242,24 @@ struct MainDashboardView: View {
         // The pins themselves changed, so a fresh zoom is warranted.
         .onChange(of: vehicle.id) { _, _ in refitMap(containerHeight: fullHeight(proxy), refreshZoom: true) }
         .onChange(of: selectedLogTab) { _, _ in refitMap(containerHeight: fullHeight(proxy), refreshZoom: true) }
-        // Beside the map in a wide window, over its bottom otherwise. Tracked in
-        // state as well so the camera maths doesn't need the proxy passed to it.
+        // Mirrored into state as well, so the camera maths doesn't need the proxy
+        // threaded through every call.
         .overlay(alignment: .trailing) {
-            if usesSidePanel { sidePanel }
+            if layout(proxy) == .sidePanel { sidePanel }
         }
-        .onAppear { sidePanelActive = usesSidePanel }
-        .onChange(of: usesSidePanel) { _, isSide in
-            sidePanelActive = isSide
-            refitMap(containerHeight: fullHeight(proxy), refreshZoom: true)
+        .overlay(alignment: .bottom) {
+            if layout(proxy) == .bottomPanel { bottomPanel(proxy) }
         }
-        .sheet(isPresented: .constant(!usesSidePanel)) {
+        .onAppear { layoutMode = layout(proxy) }
+        .onChange(of: layout(proxy)) { _, mode in
+            layoutMode = mode
+            // Deferred a turn on purpose. Reading layoutMode straight after
+            // writing it still yields the old value, so refitMap would pick the
+            // previous layout's branch - rotating to landscape framed the pins as
+            // though the portrait panel were still covering the bottom.
+            Task { refitMap(containerHeight: fullHeight(proxy), refreshZoom: true) }
+        }
+        .sheet(isPresented: .constant(layout(proxy) == .bottomSheet)) {
             DashboardSheetContent(colorScheme: _colorScheme, vehicle: vehicle, allVehicles: allVehicles, events: timelineEvents, onSelectVehicle: onSelectVehicle, newReportMonth: newReportMonth, onAcknowledgeReport: onAcknowledgeReport, selectedLogTab: $selectedLogTab, sheetDetent: $sheetDetent)
                 .presentationDetents([.fraction(0.35), .fraction(0.65), .large], selection: $sheetDetent)
                 .presentationDragIndicator(.visible).presentationBackgroundInteraction(.enabled(upThrough: .fraction(0.65))).interactiveDismissDisabled()
@@ -270,6 +303,20 @@ struct MainDashboardView: View {
             .transition(.move(edge: .trailing))
     }
 
+    /// Full-width panel on the bottom edge, for iPad portrait. Deliberately not a
+    /// sheet: at regular width the system draws sheets as a narrow centred card
+    /// floating up the screen, which is neither wide enough nor low enough.
+    private func bottomPanel(_ proxy: GeometryProxy) -> some View {
+        DashboardSheetContent(colorScheme: _colorScheme, vehicle: vehicle, allVehicles: allVehicles, events: timelineEvents, onSelectVehicle: onSelectVehicle, newReportMonth: newReportMonth, onAcknowledgeReport: onAcknowledgeReport, selectedLogTab: $selectedLogTab, sheetDetent: .constant(.large))
+            .frame(height: fullHeight(proxy) * Self.bottomPanelFraction)
+            .background(
+                .regularMaterial,
+                in: UnevenRoundedRectangle(topLeadingRadius: 28, topTrailingRadius: 28, style: .continuous)
+            )
+            .ignoresSafeArea(edges: .bottom)
+            .transition(.move(edge: .bottom))
+    }
+
     private func refitMap(containerHeight: CGFloat, refreshZoom: Bool = false) {
         let coords = displayedEvents.compactMap(\.coordinate)
         guard !coords.isEmpty, containerHeight > 0 else { return }
@@ -279,7 +326,7 @@ struct MainDashboardView: View {
         // Beside the map, nothing covers the bottom, so there is no strip to pan
         // the pins into: centre them and let the trailing inset keep them clear
         // of the panel. The vertical maths below is portrait-only by design.
-        if sidePanelActive {
+        if layoutMode == .sidePanel {
             let span = fittedSpan ?? sideBySideSpan(for: coords)
             fittedSpan = span
             withAnimation(Self.mapReframeAnimation) {
@@ -290,7 +337,7 @@ struct MainDashboardView: View {
         let span = fittedSpan ?? fittingSpan(for: coords, containerHeight: containerHeight)
         fittedSpan = span
 
-        let sheetHeight = containerHeight * sheetFraction
+        let sheetHeight = containerHeight * occludedFraction
         // Near-fully covered: nothing meaningful left to aim at, so hold still
         // rather than panning the pins away.
         guard containerHeight - Self.mapTopMargin - sheetHeight > 120 else { return }
@@ -350,7 +397,7 @@ struct MainDashboardView: View {
         // Size against the *narrowest* strip we still pan for, so the pins stay
         // on screen with the sheet raised as well as at rest. Sizing to the
         // default height fitted more tightly but hid pins once the sheet grew.
-        let narrowestStrip = max(containerHeight - Self.mapTopMargin - containerHeight * Self.tallestPannedSheetFraction, 1)
+        let narrowestStrip = max(containerHeight - Self.mapTopMargin - containerHeight * tallestOccludedFraction, 1)
         // The camera spans the usable area, so zoom out by however much taller
         // that is than the strip, leaving a margin so pins avoid the edges.
         let scale = (usableHeight(containerHeight) / narrowestStrip) / 0.8
