@@ -267,5 +267,14 @@ struct Fuel_LogApp: App {
                 .padding()
             }
         }
+        // Menu bar commands, for the hardware-keyboard case on iPad. Routed
+        // through QuickActionManager, the same bus the Home Screen quick actions
+        // already use, so ContentView needs no changes to handle them.
+        .commands {
+            CommandGroup(after: .newItem) {
+                Button("Log Fuel…") { QuickActionManager.shared.action = .addFuel }
+                    .keyboardShortcut("n", modifiers: .command)
+            }
+        }
     }
 }
