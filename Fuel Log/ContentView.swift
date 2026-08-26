@@ -133,11 +133,16 @@ struct ContentView: View {
         }
         .onChange(of: quickActionManager.action) { _, action in
             guard let action = action else { return }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            // The delay lets the UI settle when the app is launching from a Home
+            // Screen quick action or a URL. A menu command arrives with the app
+            // already on screen, where the same wait just feels unresponsive.
+            let delay = quickActionManager.actionIsImmediate ? 0 : 0.5
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
                 if action == .addVehicle { showingAddVehicle = true }
                 else if selectedVehicle != nil { quickActionTarget = action }
                 else { showingAddVehicle = true }
                 quickActionManager.action = nil
+                quickActionManager.actionIsImmediate = false
             }
         }
         .onOpenURL { url in

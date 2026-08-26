@@ -17,7 +17,17 @@ import FuelLogShared
 class QuickActionManager: ObservableObject {
     static let shared = QuickActionManager()
     @Published var action: QuickAction? = nil
-    
+    /// Set when the request came from a menu command while the app is already
+    /// running, so the handler can skip the cold-launch settling delay.
+    @Published var actionIsImmediate = false
+
+    /// Entry point for menu bar commands, as opposed to a Home Screen quick
+    /// action or a URL, which both arrive during launch.
+    func requestFromMenu(_ action: QuickAction) {
+        actionIsImmediate = true
+        self.action = action
+    }
+
     enum QuickAction: String, Identifiable {
         case addFuel = "com.motosung.fuellog.addFuel"
         case addService = "com.motosung.fuellog.addService"
@@ -272,8 +282,13 @@ struct Fuel_LogApp: App {
         // already use, so ContentView needs no changes to handle them.
         .commands {
             CommandGroup(after: .newItem) {
-                Button("Log Fuel…") { QuickActionManager.shared.action = .addFuel }
+                Button("Log Fuel…") { QuickActionManager.shared.requestFromMenu(.addFuel) }
                     .keyboardShortcut("n", modifiers: .command)
+                Button("Log Service…") { QuickActionManager.shared.requestFromMenu(.addService) }
+                    .keyboardShortcut("n", modifiers: [.command, .shift])
+                Divider()
+                Button("New Vehicle…") { QuickActionManager.shared.requestFromMenu(.addVehicle) }
+                    .keyboardShortcut("n", modifiers: [.command, .option])
             }
         }
     }
