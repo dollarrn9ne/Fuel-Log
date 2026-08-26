@@ -110,7 +110,7 @@ public enum EfficiencyConverter {
         self.batteryCapacity = batteryCapacity
     }
 
-    @Transient public var averageEfficiency: Double? { averageEfficiency(forGrade: nil) }
+    @Transient public var averageEfficiency: Double? { averageEfficiency(forGradeNamed: nil) }
 
     /// Average efficiency in the vehicle's chosen unit. Pass a `grade` to measure
     /// only the tanks filled with that fuel, so (for example) a flex-fuel driver
@@ -119,7 +119,10 @@ public enum EfficiencyConverter {
     /// A segment counts toward the requested grade only when the fuel added since
     /// the previous full tank was all of that grade; mixed segments are skipped
     /// because the distance can't be attributed to one fuel.
-    public func averageEfficiency(forGrade grade: FuelGrade?) -> Double? {
+    /// - Parameter name: the fuel's display name, or nil for every fuel together.
+    ///   Named rather than a `FuelGrade`, because two custom fuels are both stored
+    ///   as `.other` and matching on the case alone averaged them together.
+    public func averageEfficiency(forGradeNamed name: String?) -> Double? {
         let sorted = (fillUps ?? []).sorted { $0.date < $1.date }
         guard sorted.count >= 2 else { return nil }
         let electricEfficiency = efficiencyUnit == .miPerKWh || efficiencyUnit == .kmPerKWh
@@ -136,7 +139,7 @@ public enum EfficiencyConverter {
             if (fill.unit == .kwh) != electricEfficiency { continue }
             guard let odo = fill.odometer else { continue }
             volumeSinceLastFull += fill.volume
-            if let grade, (fill.fuelGrade ?? defaultFuelGrade) != grade { segmentMatchesGrade = false }
+            if let name, fill.effectiveGradeName != name { segmentMatchesGrade = false }
             if fill.isFullTank {
                 if let prevOdo = lastFullOdo, odo > prevOdo, segmentMatchesGrade {
                     dist += (odo - prevOdo)
@@ -153,18 +156,33 @@ public enum EfficiencyConverter {
 
     /// Average efficiency per fuel grade, for grades that have enough data to
     /// produce a figure. Ordered by `FuelGrade`'s declaration order.
-    @Transient public var efficiencyByGrade: [(grade: FuelGrade, efficiency: Double)] {
-        let usedGrades = Set((fillUps ?? []).compactMap { $0.fuelGrade ?? defaultFuelGrade })
-        guard usedGrades.count > 1 else { return [] }
-        return FuelGrade.allCases.compactMap { grade in
-            guard usedGrades.contains(grade), let value = averageEfficiency(forGrade: grade) else { return nil }
-            return (grade, value)
+    /// One row per fuel actually used, keyed on the name shown to the user.
+    ///
+    /// Keyed on the name rather than the `FuelGrade` case: two fuels the user
+    /// named themselves are both stored as `.other`, so keying on the case
+    /// collapsed them into a single "Other" row whose figure averaged both and
+    /// whose label discarded both names.
+    @Transient public var efficiencyByGrade: [(name: String, efficiency: Double)] {
+        let usedNames = Set((fillUps ?? []).compactMap(\.effectiveGradeName))
+        guard usedNames.count > 1 else { return [] }
+        // Standard grades keep their canonical order; custom names have no case
+        // to order by, so they follow, alphabetically.
+        let ordered = usedNames.sorted { lhs, rhs in
+            let l = FuelGrade.allCases.firstIndex { $0.rawValue == lhs } ?? FuelGrade.allCases.count
+            let r = FuelGrade.allCases.firstIndex { $0.rawValue == rhs } ?? FuelGrade.allCases.count
+            return l == r ? lhs < rhs : l < r
+        }
+        return ordered.compactMap { name in
+            guard let value = averageEfficiency(forGradeNamed: name) else { return nil }
+            return (name, value)
         }
     }
 
     /// Average price paid per unit for a grade, for cost-per-distance comparisons.
-    public func averagePrice(forGrade grade: FuelGrade) -> Double? {
-        let matching = (fillUps ?? []).filter { ($0.fuelGrade ?? defaultFuelGrade) == grade && $0.volume > 0 }
+    /// Named rather than a `FuelGrade`, for the same reason as
+    /// `averageEfficiency(forGradeNamed:)`: custom fuels share the `.other` case.
+    public func averagePrice(forGradeNamed name: String) -> Double? {
+        let matching = (fillUps ?? []).filter { $0.effectiveGradeName == name && $0.volume > 0 }
         guard !matching.isEmpty else { return nil }
         let volume = matching.map(\.volume).reduce(0, +)
         guard volume > 0 else { return nil }

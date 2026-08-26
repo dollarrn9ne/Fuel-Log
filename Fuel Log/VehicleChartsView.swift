@@ -323,9 +323,9 @@ struct VehicleChartsView: View {
                     .font(.caption.weight(.bold))
                     .foregroundStyle(.secondary)
 
-                ForEach(comparison, id: \.grade) { entry in
+                ForEach(comparison, id: \.name) { entry in
                     HStack(alignment: .firstTextBaseline) {
-                        Text(entry.grade.rawValue)
+                        Text(entry.name)
                             .font(.subheadline.weight(.bold))
                             .frame(minWidth: 70, alignment: .leading)
 
@@ -355,8 +355,8 @@ struct VehicleChartsView: View {
     }
 
     /// Average fuel cost per unit of distance for a grade, e.g. "$0.15/mi".
-    private func costPerDistance(for entry: (grade: FuelGrade, efficiency: Double)) -> String? {
-        guard let price = vehicle.averagePrice(forGrade: entry.grade), price > 0, entry.efficiency > 0 else { return nil }
+    private func costPerDistance(for entry: (name: String, efficiency: Double)) -> String? {
+        guard let price = vehicle.averagePrice(forGradeNamed: entry.name), price > 0, entry.efficiency > 0 else { return nil }
         // For L/100 km, efficiency is consumption (volume per distance) rather
         // than distance per volume, so the cost math inverts.
         let perDistance: Double
