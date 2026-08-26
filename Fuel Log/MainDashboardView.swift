@@ -48,10 +48,6 @@ struct MainDashboardView: View {
     @State private var isMapReady = false
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var layoutMode: DashboardLayout = .bottomSheet
-    /// Settled height of the portrait panel, as a fraction of the screen.
-    @State private var bottomPanelDetent: CGFloat = 0.35
-    /// Live height while the handle is being dragged; nil when settled.
-    @State private var bottomPanelDragHeight: CGFloat?
 
     /// Where the dashboard content sits relative to the map.
     private enum DashboardLayout { case bottomSheet, sidePanel, bottomPanel }
@@ -91,11 +87,12 @@ struct MainDashboardView: View {
     /// Bottom inset applied to the map, sized so the attribution clears the sheet
     /// at its resting height without sitting any higher than it needs to.
     private func attributionInset(_ containerHeight: CGFloat) -> CGFloat {
-        // The drop is calibrated against the sheet, where MapKit's own margin left
-        // the logo floating well clear. Under the portrait panel that same trim
-        // pushes it back under the panel's top edge, so inset by the full height.
-        let drop = layoutMode == .bottomPanel ? 0 : Self.attributionDrop
-        return max(containerHeight * restingOccludedFraction - drop, 0)
+        // The card floats clear of the bottom edge, so the attribution has to
+        // clear the card *and* its margins rather than a fraction of the screen.
+        if layoutMode == .bottomPanel {
+            return containerHeight * Self.bottomCardHeightFraction + Self.bottomCardMargin * 2
+        }
+        return max(containerHeight * restingOccludedFraction - Self.attributionDrop, 0)
     }
 
     /// The part of the map the camera actually frames into. The bottom inset that
@@ -132,18 +129,23 @@ struct MainDashboardView: View {
         return proxy.size.width > proxy.size.height ? .sidePanel : .bottomPanel
     }
 
-    /// The heights the portrait panel snaps to, matching the sheet's detents so
-    /// the two behave the same way on either idiom.
-    private static let bottomPanelDetents: [CGFloat] = [smallestSheetFraction, tallestPannedSheetFraction, 0.92]
+    /// Portrait shows a card floating clear of the edges with the map visible all
+    /// round it, the way Maps does on iPad. A bar pinned across the full width is
+    /// the thing that reads as a phone layout enlarged.
+    private static let bottomCardHeightFraction: CGFloat = 0.5
+    private static let bottomCardWidthFraction: CGFloat = 0.6
+    private static let bottomCardMinWidth: CGFloat = 360
+    private static let bottomCardMaxWidth: CGFloat = 560
+    private static let bottomCardMargin: CGFloat = 20
 
     /// Share of the height covered by whatever sits over the map's bottom.
     private var occludedFraction: CGFloat {
-        layoutMode == .bottomPanel ? bottomPanelDetent : sheetFraction
+        layoutMode == .bottomPanel ? Self.bottomCardHeightFraction : sheetFraction
     }
 
     /// The occlusion at rest, which is what the attribution has to clear.
     private var restingOccludedFraction: CGFloat {
-        layoutMode == .bottomPanel ? bottomPanelDetent : Self.smallestSheetFraction
+        layoutMode == .bottomPanel ? Self.bottomCardHeightFraction : Self.smallestSheetFraction
     }
 
     /// The most the map is ever covered, which is what the zoom keeps pins clear
@@ -247,7 +249,7 @@ struct MainDashboardView: View {
         .overlay(alignment: .trailing) {
             if layout(proxy) == .sidePanel { sidePanel }
         }
-        .overlay(alignment: .bottom) {
+        .overlay(alignment: .bottomLeading) {
             if layout(proxy) == .bottomPanel { bottomPanel(proxy) }
         }
         .onAppear { layoutMode = layout(proxy) }
@@ -326,54 +328,28 @@ struct MainDashboardView: View {
         }
     }
 
-    /// The pill, for iPad portrait: same grab handle and snap heights as the sheet
-    /// on iPhone, but built by hand. At regular width the system draws a sheet as
-    /// a narrow card floating up the screen, and neither its width nor its
-    /// position can be changed.
+    /// The portrait card: floats clear of the edges with the map visible around
+    /// it, rather than spanning the width and pinning to the bottom.
+    ///
+    /// Fixed size, no handle. Every previous attempt at a draggable edge here
+    /// re-framed the map camera mid-gesture and jittered; the log list scrolls, so
+    /// nothing is out of reach without one.
     private func bottomPanel(_ proxy: GeometryProxy) -> some View {
-        let full = fullHeight(proxy)
-        return VStack(spacing: 0) {
-            bottomPanelHandle(full: full)
-            DashboardSheetContent(colorScheme: _colorScheme, vehicle: vehicle, allVehicles: allVehicles, events: timelineEvents, onSelectVehicle: onSelectVehicle, newReportMonth: newReportMonth, onAcknowledgeReport: onAcknowledgeReport, selectedLogTab: $selectedLogTab, sheetDetent: .constant(.large))
-        }
-        .frame(height: bottomPanelDragHeight ?? full * bottomPanelDetent)
-        .background {
-            panelBackground(in: UnevenRoundedRectangle(topLeadingRadius: 28, topTrailingRadius: 28, style: .continuous), frosted: true)
-        }
-        .ignoresSafeArea(edges: .bottom)
-        .animation(.smooth(duration: 0.28), value: bottomPanelDetent)
-        .transition(.move(edge: .bottom))
-    }
-
-    /// The gesture lives on the handle rather than the whole panel, or it would
-    /// swallow the log list's scrolling.
-    private func bottomPanelHandle(full: CGFloat) -> some View {
-        Capsule()
-            .fill(.secondary.opacity(0.6))
-            .frame(width: 40, height: 5)
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 10)
-            .contentShape(Rectangle())
-            .gesture(
-                DragGesture()
-                    .onChanged { value in
-                        // Only the panel's own height follows the finger. The map's
-                        // inset is left alone until release: re-framing the camera
-                        // on every update is what made the resizable side panel
-                        // jitter, and the system sheet doesn't do it either.
-                        let settled = full * bottomPanelDetent
-                        bottomPanelDragHeight = min(max(settled - value.translation.height, full * 0.2), full * 0.95)
-                    }
-                    .onEnded { _ in
-                        let fraction = (bottomPanelDragHeight ?? full * bottomPanelDetent) / full
-                        bottomPanelDetent = Self.bottomPanelDetents
-                            .min(by: { abs($0 - fraction) < abs($1 - fraction) }) ?? Self.smallestSheetFraction
-                        bottomPanelDragHeight = nil
-                        // Deferred so refitMap sees the detent just written.
-                        Task { refitMap(containerHeight: full) }
-                    }
-            )
-            .accessibilityLabel("Resize panel")
+        let cardShape = RoundedRectangle(cornerRadius: 28, style: .continuous)
+        let width = min(max(proxy.size.width * Self.bottomCardWidthFraction, Self.bottomCardMinWidth), Self.bottomCardMaxWidth)
+        return DashboardSheetContent(colorScheme: _colorScheme, vehicle: vehicle, allVehicles: allVehicles, events: timelineEvents, onSelectVehicle: onSelectVehicle, newReportMonth: newReportMonth, onAcknowledgeReport: onAcknowledgeReport, selectedLogTab: $selectedLogTab, sheetDetent: .constant(.large))
+            .frame(width: width, height: fullHeight(proxy) * Self.bottomCardHeightFraction)
+            .background { panelBackground(in: cardShape, frosted: true) }
+            .clipShape(cardShape)
+            .shadow(color: .black.opacity(0.18), radius: 14, y: 4)
+            .padding(.horizontal, Self.bottomCardMargin)
+            .padding(.top, Self.bottomCardMargin)
+            // The safe area has to be added by hand. A sibling in the ZStack
+            // ignores it so the map can bleed to the edges, which leaves the
+            // overlay measuring against the full screen - without this the card
+            // ran under the home indicator.
+            .padding(.bottom, Self.bottomCardMargin + proxy.safeAreaInsets.bottom)
+            .transition(.move(edge: .bottom).combined(with: .opacity))
     }
 
     private func refitMap(containerHeight: CGFloat, refreshZoom: Bool = false) {
