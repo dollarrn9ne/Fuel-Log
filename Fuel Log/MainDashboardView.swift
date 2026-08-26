@@ -289,8 +289,14 @@ struct MainDashboardView: View {
     private var sidePanel: some View {
         DashboardSheetContent(colorScheme: _colorScheme, vehicle: vehicle, allVehicles: allVehicles, events: timelineEvents, onSelectVehicle: onSelectVehicle, newReportMonth: newReportMonth, onAcknowledgeReport: onAcknowledgeReport, selectedLogTab: $selectedLogTab, sheetDetent: .constant(.large))
             .frame(width: Self.panelWidth)
+            .frame(maxHeight: .infinity)
             .background {
+                // Only the glass runs to the top and bottom edges. Letting the
+                // whole panel ignore the safe area would slide the header under
+                // the status bar, but leaving the background inside it stranded
+                // a strip of map above and below, so the panel looked clipped.
                 panelBackground(in: UnevenRoundedRectangle(topLeadingRadius: 28, bottomLeadingRadius: 28, style: .continuous), frosted: true)
+                    .ignoresSafeArea(edges: .vertical)
             }
             .transition(.move(edge: .trailing))
     }
@@ -300,11 +306,12 @@ struct MainDashboardView: View {
     /// clear glass: the portrait panel came out a washed-out green where the
     /// iPhone picks up the map vividly, and the side panel came out flat grey.
     ///
-    /// - Parameter frosted: for the side panel. Clear glass is barely there, which
-    ///   is right over the map's bottom edge but not over the dense middle of it -
-    ///   street labels showed through and collided with the stats row. Frosted
-    ///   still reads as glass and still picks up the map's colour, but blurs what
-    ///   is behind enough to stay legible.
+    /// - Parameter frosted: true for the hand-built panels, false for the sheet.
+    ///   Clear glass works for the sheet because the system dims and blurs behind
+    ///   a presentation as well; an inline panel gets none of that, so the same
+    ///   setting left the map showing through almost unimpeded - street labels
+    ///   reading straight through the stats row. Frosted still takes the map's
+    ///   colour, it just blurs enough to stay legible over dense map detail.
     @ViewBuilder
     private func panelBackground(in shape: some Shape, frosted: Bool = false) -> some View {
         if #available(iOS 26.0, *) {
@@ -331,7 +338,7 @@ struct MainDashboardView: View {
         }
         .frame(height: bottomPanelDragHeight ?? full * bottomPanelDetent)
         .background {
-            panelBackground(in: UnevenRoundedRectangle(topLeadingRadius: 28, topTrailingRadius: 28, style: .continuous))
+            panelBackground(in: UnevenRoundedRectangle(topLeadingRadius: 28, topTrailingRadius: 28, style: .continuous), frosted: true)
         }
         .ignoresSafeArea(edges: .bottom)
         .animation(.smooth(duration: 0.28), value: bottomPanelDetent)
