@@ -628,9 +628,22 @@ struct DashboardSheetContent: View {
         .sheet(isPresented: $showingArchivedVehicles) { ArchivedVehiclesView().roomySheetOnPad() }
         .sheet(isPresented: $showingCharts) { VehicleChartsView(vehicle: vehicle).roomySheetOnPad() }
         .alert("Delete \(vehicle.name)?", isPresented: $showingDeleteConfirmation) { Button("Cancel", role: .cancel) {}; Button("Delete", role: .destructive) { deleteEvent(vehicle) } } message: { Text("This will permanently delete this vehicle and all logs.") }
-        .fullScreenCover(isPresented: $showingTrips) { NavigationStack { TripsListView(vehicle: vehicle) } }
+        // A sheet that adapts to a full-screen cover when compact, rather than a
+        // cover everywhere. Taking over the whole iPad for a secondary task hides
+        // the map and the vehicle you were looking at; on a phone the cover is
+        // still right. Declared as one presentation so the view keeps its
+        // identity across a rotation rather than being torn down and rebuilt.
+        .sheet(isPresented: $showingTrips) {
+            NavigationStack { TripsListView(vehicle: vehicle) }
+                .presentationCompactAdaptation(.fullScreenCover)
+                .roomySheetOnPad()
+        }
         .sheet(isPresented: $showingMonthlyReport) { NavigationStack { MonthlyReportView(month: monthlyReportMonth, isModal: true) }.roomySheetOnPad() }
-        .fullScreenCover(isPresented: $showingSettings) { NavigationStack { SettingsView() } }
+        .sheet(isPresented: $showingSettings) {
+            NavigationStack { SettingsView() }
+                .presentationCompactAdaptation(.fullScreenCover)
+                .roomySheetOnPad()
+        }
     }
     
     private var headerBar: some View {
