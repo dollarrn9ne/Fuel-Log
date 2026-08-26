@@ -48,6 +48,10 @@ struct MainDashboardView: View {
     @State private var isMapReady = false
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var layoutMode: DashboardLayout = .bottomSheet
+    /// Settled height of the portrait card, as a fraction of the screen.
+    @State private var cardHeightFraction: CGFloat = 0.34
+    /// Live height while the pull bar is being dragged; nil when settled.
+    @State private var cardDragHeight: CGFloat?
 
     /// Where the dashboard content sits relative to the map.
     private enum DashboardLayout { case bottomSheet, sidePanel, bottomPanel }
@@ -90,7 +94,7 @@ struct MainDashboardView: View {
         // The card floats clear of the bottom edge, so the attribution has to
         // clear the card *and* its margins rather than a fraction of the screen.
         if layoutMode == .bottomPanel {
-            return containerHeight * Self.bottomCardHeightFraction + Self.bottomCardMargin * 2
+            return containerHeight * cardHeightFraction + Self.bottomCardMargin * 2
         }
         return max(containerHeight * restingOccludedFraction - Self.attributionDrop, 0)
     }
@@ -132,7 +136,11 @@ struct MainDashboardView: View {
     /// Portrait shows a card floating clear of the edges with the map visible all
     /// round it, the way Maps does on iPad. A bar pinned across the full width is
     /// the thing that reads as a phone layout enlarged.
-    private static let bottomCardHeightFraction: CGFloat = 0.5
+    /// Resting height: enough for the header, stats, actions and the log tabs.
+    private static let bottomCardRestingHeightFraction: CGFloat = 0.34
+    /// Hard stop at half the screen. Past that the card stops reading as
+    /// something floating over the map and becomes a panel covering it again.
+    private static let bottomCardMaxHeightFraction: CGFloat = 0.5
     private static let bottomCardWidthFraction: CGFloat = 0.6
     private static let bottomCardMinWidth: CGFloat = 360
     private static let bottomCardMaxWidth: CGFloat = 560
@@ -140,12 +148,12 @@ struct MainDashboardView: View {
 
     /// Share of the height covered by whatever sits over the map's bottom.
     private var occludedFraction: CGFloat {
-        layoutMode == .bottomPanel ? Self.bottomCardHeightFraction : sheetFraction
+        layoutMode == .bottomPanel ? cardHeightFraction : sheetFraction
     }
 
     /// The occlusion at rest, which is what the attribution has to clear.
     private var restingOccludedFraction: CGFloat {
-        layoutMode == .bottomPanel ? Self.bottomCardHeightFraction : Self.smallestSheetFraction
+        layoutMode == .bottomPanel ? cardHeightFraction : Self.smallestSheetFraction
     }
 
     /// The most the map is ever covered, which is what the zoom keeps pins clear
@@ -331,14 +339,16 @@ struct MainDashboardView: View {
     /// The portrait card: floats clear of the edges with the map visible around
     /// it, rather than spanning the width and pinning to the bottom.
     ///
-    /// Fixed size, no handle. Every previous attempt at a draggable edge here
-    /// re-framed the map camera mid-gesture and jittered; the log list scrolls, so
-    /// nothing is out of reach without one.
+    /// Resizable by the pull bar between its resting height and half the screen.
     private func bottomPanel(_ proxy: GeometryProxy) -> some View {
+        let full = fullHeight(proxy)
         let cardShape = RoundedRectangle(cornerRadius: 28, style: .continuous)
         let width = min(max(proxy.size.width * Self.bottomCardWidthFraction, Self.bottomCardMinWidth), Self.bottomCardMaxWidth)
-        return DashboardSheetContent(colorScheme: _colorScheme, vehicle: vehicle, allVehicles: allVehicles, events: timelineEvents, onSelectVehicle: onSelectVehicle, newReportMonth: newReportMonth, onAcknowledgeReport: onAcknowledgeReport, selectedLogTab: $selectedLogTab, sheetDetent: .constant(.large))
-            .frame(width: width, height: fullHeight(proxy) * Self.bottomCardHeightFraction)
+        return VStack(spacing: 0) {
+            bottomCardPullBar(full: full)
+            DashboardSheetContent(colorScheme: _colorScheme, vehicle: vehicle, allVehicles: allVehicles, events: timelineEvents, onSelectVehicle: onSelectVehicle, newReportMonth: newReportMonth, onAcknowledgeReport: onAcknowledgeReport, selectedLogTab: $selectedLogTab, sheetDetent: .constant(.large))
+        }
+            .frame(width: width, height: cardDragHeight ?? full * cardHeightFraction)
             .background { panelBackground(in: cardShape, frosted: true) }
             .clipShape(cardShape)
             .shadow(color: .black.opacity(0.18), radius: 14, y: 4)
@@ -349,7 +359,40 @@ struct MainDashboardView: View {
             // overlay measuring against the full screen - without this the card
             // ran under the home indicator.
             .padding(.bottom, Self.bottomCardMargin + proxy.safeAreaInsets.bottom)
+            .animation(.smooth(duration: 0.28), value: cardHeightFraction)
             .transition(.move(edge: .bottom).combined(with: .opacity))
+    }
+
+    /// Drags the card between its resting height and the half-screen ceiling.
+    ///
+    /// Only the card's own height follows the finger. The map's inset waits for
+    /// release: re-framing the camera on every gesture update is what made the
+    /// resizable side panel jitter.
+    private func bottomCardPullBar(full: CGFloat) -> some View {
+        Capsule()
+            .fill(.secondary.opacity(0.6))
+            .frame(width: 40, height: 5)
+            .frame(maxWidth: .infinity)
+            .padding(.top, 10)
+            .padding(.bottom, 2)
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture()
+                    .onChanged { value in
+                        let settled = full * cardHeightFraction
+                        cardDragHeight = min(
+                            max(settled - value.translation.height, full * Self.bottomCardRestingHeightFraction),
+                            full * Self.bottomCardMaxHeightFraction
+                        )
+                    }
+                    .onEnded { _ in
+                        cardHeightFraction = (cardDragHeight ?? full * cardHeightFraction) / full
+                        cardDragHeight = nil
+                        // Deferred so refitMap sees the fraction just written.
+                        Task { refitMap(containerHeight: full) }
+                    }
+            )
+            .accessibilityLabel("Resize card")
     }
 
     private func refitMap(containerHeight: CGFloat, refreshZoom: Bool = false) {
