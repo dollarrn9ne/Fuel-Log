@@ -263,17 +263,7 @@ struct MainDashboardView: View {
             DashboardSheetContent(colorScheme: _colorScheme, vehicle: vehicle, allVehicles: allVehicles, events: timelineEvents, onSelectVehicle: onSelectVehicle, newReportMonth: newReportMonth, onAcknowledgeReport: onAcknowledgeReport, selectedLogTab: $selectedLogTab, sheetDetent: $sheetDetent)
                 .presentationDetents([.fraction(0.35), .fraction(0.65), .large], selection: $sheetDetent)
                 .presentationDragIndicator(.visible).presentationBackgroundInteraction(.enabled(upThrough: .fraction(0.65))).interactiveDismissDisabled()
-                .presentationBackground {
-                    if #available(iOS 26.0, *) {
-                        if colorScheme == .dark {
-                            Color.black.opacity(0.5).glassEffect(.clear, in: Rectangle())
-                        } else {
-                            Color.clear.glassEffect(.clear, in: Rectangle())
-                        }
-                    } else {
-                        colorScheme == .dark ? Color(uiColor: .systemBackground).opacity(0.85) : Color(uiColor: .systemGroupedBackground)
-                    }
-                }
+                .presentationBackground { panelBackground(in: Rectangle()) }
         }
         .onChange(of: sheetDetent) { _, _ in
             refitMap(containerHeight: fullHeight(proxy))
@@ -299,8 +289,34 @@ struct MainDashboardView: View {
     private var sidePanel: some View {
         DashboardSheetContent(colorScheme: _colorScheme, vehicle: vehicle, allVehicles: allVehicles, events: timelineEvents, onSelectVehicle: onSelectVehicle, newReportMonth: newReportMonth, onAcknowledgeReport: onAcknowledgeReport, selectedLogTab: $selectedLogTab, sheetDetent: .constant(.large))
             .frame(width: Self.panelWidth)
-            .background(.regularMaterial)
+            .background {
+                panelBackground(in: UnevenRoundedRectangle(topLeadingRadius: 28, bottomLeadingRadius: 28, style: .continuous), frosted: true)
+            }
             .transition(.move(edge: .trailing))
+    }
+
+    /// The treatment `presentationBackground` gives the sheet, so the hand-built
+    /// panels match it. `.regularMaterial` was far more opaque than the sheet's
+    /// clear glass: the portrait panel came out a washed-out green where the
+    /// iPhone picks up the map vividly, and the side panel came out flat grey.
+    ///
+    /// - Parameter frosted: for the side panel. Clear glass is barely there, which
+    ///   is right over the map's bottom edge but not over the dense middle of it -
+    ///   street labels showed through and collided with the stats row. Frosted
+    ///   still reads as glass and still picks up the map's colour, but blurs what
+    ///   is behind enough to stay legible.
+    @ViewBuilder
+    private func panelBackground(in shape: some Shape, frosted: Bool = false) -> some View {
+        if #available(iOS 26.0, *) {
+            if colorScheme == .dark {
+                Color.black.opacity(0.5).glassEffect(frosted ? .regular : .clear, in: shape)
+            } else {
+                Color.clear.glassEffect(frosted ? .regular : .clear, in: shape)
+            }
+        } else {
+            (colorScheme == .dark ? Color(uiColor: .systemBackground).opacity(0.85) : Color(uiColor: .systemGroupedBackground))
+                .clipShape(shape)
+        }
     }
 
     /// The pill, for iPad portrait: same grab handle and snap heights as the sheet
@@ -314,10 +330,9 @@ struct MainDashboardView: View {
             DashboardSheetContent(colorScheme: _colorScheme, vehicle: vehicle, allVehicles: allVehicles, events: timelineEvents, onSelectVehicle: onSelectVehicle, newReportMonth: newReportMonth, onAcknowledgeReport: onAcknowledgeReport, selectedLogTab: $selectedLogTab, sheetDetent: .constant(.large))
         }
         .frame(height: bottomPanelDragHeight ?? full * bottomPanelDetent)
-        .background(
-            .regularMaterial,
-            in: UnevenRoundedRectangle(topLeadingRadius: 28, topTrailingRadius: 28, style: .continuous)
-        )
+        .background {
+            panelBackground(in: UnevenRoundedRectangle(topLeadingRadius: 28, topTrailingRadius: 28, style: .continuous))
+        }
         .ignoresSafeArea(edges: .bottom)
         .animation(.smooth(duration: 0.28), value: bottomPanelDetent)
         .transition(.move(edge: .bottom))
