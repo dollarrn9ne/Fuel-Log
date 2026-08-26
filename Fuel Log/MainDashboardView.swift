@@ -145,6 +145,8 @@ struct MainDashboardView: View {
     private static let bottomCardMinWidth: CGFloat = 360
     private static let bottomCardMaxWidth: CGFloat = 560
     private static let bottomCardMargin: CGFloat = 20
+    /// Height granularity while dragging, in points. See bottomCardPullBar.
+    private static let cardDragStep: CGFloat = 8
 
     /// Share of the height covered by whatever sits over the map's bottom.
     private var occludedFraction: CGFloat {
@@ -351,14 +353,19 @@ struct MainDashboardView: View {
             .frame(width: width, height: cardDragHeight ?? full * cardHeightFraction)
             .background { panelBackground(in: cardShape, frosted: true) }
             .clipShape(cardShape)
-            .shadow(color: .black.opacity(0.18), radius: 14, y: 4)
-            .padding(.horizontal, Self.bottomCardMargin)
-            .padding(.top, Self.bottomCardMargin)
-            // The safe area has to be added by hand. A sibling in the ZStack
-            // ignores it so the map can bleed to the edges, which leaves the
-            // overlay measuring against the full screen - without this the card
-            // ran under the home indicator.
-            .padding(.bottom, Self.bottomCardMargin + proxy.safeAreaInsets.bottom)
+            // No shadow mid-drag. It has to be recomputed against the card's
+            // silhouette every time the height changes, and it is invisible under
+            // a moving finger anyway.
+            .shadow(color: .black.opacity(cardDragHeight == nil ? 0.18 : 0), radius: 14, y: 4)
+            // The live height is the finger's position, not an animated value.
+            // Any implicit animation in scope would try to interpolate towards a
+            // target that moves again next frame, which reads as stutter.
+            .animation(nil, value: cardDragHeight)
+            // Even margin on every side. The overlay measures against the full
+            // screen, since a sibling in the ZStack ignores the safe area so the
+            // map can bleed to the edges - so this is a true 20pt from each
+            // screen edge, which clears the home indicator on its own.
+            .padding(Self.bottomCardMargin)
             .animation(.smooth(duration: 0.28), value: cardHeightFraction)
             .transition(.move(edge: .bottom).combined(with: .opacity))
     }
@@ -380,10 +387,18 @@ struct MainDashboardView: View {
                 DragGesture()
                     .onChanged { value in
                         let settled = full * cardHeightFraction
-                        cardDragHeight = min(
+                        let target = min(
                             max(settled - value.translation.height, full * Self.bottomCardRestingHeightFraction),
                             full * Self.bottomCardMaxHeightFraction
                         )
+                        // Quantised. Every distinct height re-lays out the whole
+                        // card - the log list included - and re-renders the glass
+                        // at a new size, so following the finger point for point
+                        // meant a full layout pass per frame. Rounding to a step
+                        // cuts that by roughly an order of magnitude and is not
+                        // perceptible while dragging.
+                        let stepped = (target / Self.cardDragStep).rounded() * Self.cardDragStep
+                        if stepped != cardDragHeight { cardDragHeight = stepped }
                     }
                     .onEnded { _ in
                         cardHeightFraction = (cardDragHeight ?? full * cardHeightFraction) / full
