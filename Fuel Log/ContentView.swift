@@ -43,11 +43,23 @@ struct ContentView: View {
     
     @State private var showingAddVehicle = false
     @StateObject private var quickActionManager = QuickActionManager.shared
+    @StateObject private var menuCommands = MenuCommandBus.shared
     @State private var quickActionTarget: QuickActionManager.QuickAction?
     @State private var isUnlocked: Bool = false
 
     var unarchivedVehicles: [Vehicle] { vehicles.filter { !$0.isArchived } }
     var selectedVehicle: Vehicle? { unarchivedVehicles.first(where: { $0.id.uuidString == lastSelectedVehicleID }) ?? unarchivedVehicles.first }
+
+    /// Steps to the next or previous vehicle, wrapping at either end so the
+    /// shortcut keeps working rather than going dead on the last one.
+    private func cycleVehicle(forward: Bool) {
+        let list = unarchivedVehicles
+        guard list.count > 1, let current = selectedVehicle,
+              let index = list.firstIndex(where: { $0.id == current.id }) else { return }
+        let step = forward ? 1 : -1
+        let next = (index + step + list.count) % list.count
+        lastSelectedVehicleID = list[next].id.uuidString
+    }
 
     var newReportMonth: Date? {
         let calendar = Calendar.current
@@ -130,6 +142,12 @@ struct ContentView: View {
                 if target == .addFuel { NavigationStack { AddFillUpView(vehicle: vehicle) } }
                 else if target == .addService { NavigationStack { AddServiceView(vehicle: vehicle) } }
             }
+        }
+        // Vehicle switching lives here, since this is where the selection is held.
+        .onChange(of: menuCommands.pending) { _, command in
+            guard let command, command == .nextVehicle || command == .previousVehicle else { return }
+            cycleVehicle(forward: command == .nextVehicle)
+            menuCommands.consume(command)
         }
         .onChange(of: quickActionManager.action) { _, action in
             guard let action = action else { return }

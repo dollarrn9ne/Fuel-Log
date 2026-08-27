@@ -46,6 +46,7 @@ struct MainDashboardView: View {
     @State private var selectedLogTab: LogTabChoice = .fuel
     @StateObject private var locationManager = CurrentLocationManager()
     @State private var isMapReady = false
+    @StateObject private var menuCommands = MenuCommandBus.shared
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var layoutMode: DashboardLayout = .bottomSheet
     /// Settled height of the portrait card, as a fraction of the screen.
@@ -279,6 +280,16 @@ struct MainDashboardView: View {
         }
         .onChange(of: sheetDetent) { _, _ in
             refitMap(containerHeight: fullHeight(proxy))
+        }
+        // Menu commands whose state lives on this view.
+        .onChange(of: menuCommands.pending) { _, command in
+            switch command {
+            case .showFuelLogs: selectedLogTab = .fuel
+            case .showServiceLogs: selectedLogTab = .service
+            case .toggleSatellite: useSatellite.toggle()
+            default: return
+            }
+            if let command { menuCommands.consume(command) }
         }
         }
     }
@@ -568,6 +579,7 @@ struct DashboardSheetContent: View {
     @State private var vehicleShareItem: VehicleShareItem?
     
     @State private var searchText: String = ""
+    @StateObject private var sheetMenuCommands = MenuCommandBus.shared
 
     var body: some View {
         VStack(spacing: 0) {
@@ -644,8 +656,19 @@ struct DashboardSheetContent: View {
                 .presentationCompactAdaptation(.fullScreenCover)
                 .roomySheetOnPad()
         }
+        // Menu commands that open one of this view's presentations.
+        .onChange(of: sheetMenuCommands.pending) { _, command in
+            switch command {
+            case .showCharts: showingCharts = true
+            case .showTrips: showingTrips = true
+            case .showSettings: showingSettings = true
+            case .showArchivedVehicles: showingArchivedVehicles = true
+            default: return
+            }
+            if let command { sheetMenuCommands.consume(command) }
+        }
     }
-    
+
     private var headerBar: some View {
         HStack(spacing: 16) {
             // A system Menu rather than a hand-rolled overlay: it renders outside

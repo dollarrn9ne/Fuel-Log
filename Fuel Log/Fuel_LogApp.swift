@@ -37,6 +37,37 @@ class QuickActionManager: ObservableObject {
     }
 }
 
+// MARK: - Menu Command Bus
+//
+// Menu bar commands are declared on the Scene, which can't reach the @State that
+// drives the dashboard. This carries them down to whichever view owns the state:
+// each command has exactly one handler, and that handler clears it.
+//
+// Separate from QuickActionManager because those cases are Home Screen shortcut
+// identifiers with matching Info.plist entries; these are view actions.
+@MainActor
+final class MenuCommandBus: ObservableObject {
+    static let shared = MenuCommandBus()
+    private init() {}
+
+    enum Command: Equatable {
+        case showFuelLogs, showServiceLogs
+        case toggleSatellite
+        case showCharts, showTrips, showSettings, showArchivedVehicles
+        case nextVehicle, previousVehicle
+    }
+
+    @Published var pending: Command?
+
+    func send(_ command: Command) { pending = command }
+
+    /// Called by the view that owns the state for a command, so it doesn't fire
+    /// twice if another observer re-renders.
+    func consume(_ command: Command) {
+        if pending == command { pending = nil }
+    }
+}
+
 class AppDelegate: NSObject, UIApplicationDelegate {
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey : Any]? = nil) -> Bool {
         let fuelIcon = UIApplicationShortcutIcon(systemImageName: "fuelpump.fill")
@@ -289,6 +320,30 @@ struct Fuel_LogApp: App {
                 Divider()
                 Button("New Vehicle…") { QuickActionManager.shared.requestFromMenu(.addVehicle) }
                     .keyboardShortcut("n", modifiers: [.command, .option])
+            }
+            // Populates View, which the system otherwise renders as the rather
+            // unfinished-looking "No Menu Items".
+            CommandGroup(after: .toolbar) {
+                Button("Fuel Logs") { MenuCommandBus.shared.send(.showFuelLogs) }
+                    .keyboardShortcut("1", modifiers: .command)
+                Button("Service Logs") { MenuCommandBus.shared.send(.showServiceLogs) }
+                    .keyboardShortcut("2", modifiers: .command)
+                Divider()
+                Button("Trends & Charts") { MenuCommandBus.shared.send(.showCharts) }
+                    .keyboardShortcut("t", modifiers: .command)
+                Button("Road Trips") { MenuCommandBus.shared.send(.showTrips) }
+                    .keyboardShortcut("t", modifiers: [.command, .shift])
+                Button("Archived Vehicles") { MenuCommandBus.shared.send(.showArchivedVehicles) }
+                Divider()
+                Button("Satellite Map") { MenuCommandBus.shared.send(.toggleSatellite) }
+                    .keyboardShortcut("l", modifiers: .command)
+                Divider()
+                Button("Next Vehicle") { MenuCommandBus.shared.send(.nextVehicle) }
+                    .keyboardShortcut("]", modifiers: .command)
+                Button("Previous Vehicle") { MenuCommandBus.shared.send(.previousVehicle) }
+                    .keyboardShortcut("[", modifiers: .command)
+                Divider()
+                Button("Settings…") { MenuCommandBus.shared.send(.showSettings) }
             }
         }
     }
