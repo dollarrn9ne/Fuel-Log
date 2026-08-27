@@ -196,6 +196,22 @@ enum FullBackup {
             .first?.appendingPathComponent("PreRestoreSafetyCopy.json")
     }
 
+    /// The snapshot left behind by a restore that didn't finish, if there is one.
+    ///
+    /// Its presence at launch is the signal that a restore failed part way: the
+    /// file is written before the deletes and removed only on success.
+    static var pendingSafetyCopy: Data? {
+        guard let url = safetyCopyURL, FileManager.default.fileExists(atPath: url.path) else { return nil }
+        return try? Data(contentsOf: url)
+    }
+
+    /// Throws the snapshot away, for when the user would rather keep what's
+    /// currently in the app than roll back to it.
+    static func discardSafetyCopy() {
+        guard let url = safetyCopyURL else { return }
+        try? FileManager.default.removeItem(at: url)
+    }
+
     /// Restores a backup, replacing everything currently stored.
     ///
     /// The deletes below are batch operations that hit the store immediately, so
@@ -210,7 +226,15 @@ enum FullBackup {
     static func restore(from data: Data, context: ModelContext) throws -> Int {
         let envelope = try decodeEnvelope(from: data)
         let safetyCopy = try? exportData(context: context)
-        if let safetyCopy, let url = safetyCopyURL { try? safetyCopy.write(to: url, options: .atomic) }
+        // Never overwrite an existing snapshot. If one is already on disk then an
+        // earlier restore failed and this call is most likely the recovery
+        // attempt - writing now would replace the good copy with the broken state
+        // it is trying to undo, and a second failure would leave nothing to
+        // return to.
+        if let safetyCopy, let url = safetyCopyURL,
+           !FileManager.default.fileExists(atPath: url.path) {
+            try? safetyCopy.write(to: url, options: .atomic)
+        }
 
         do {
             try apply(envelope, context: context)

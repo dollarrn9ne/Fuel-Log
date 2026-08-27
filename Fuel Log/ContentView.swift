@@ -45,6 +45,9 @@ struct ContentView: View {
     @StateObject private var quickActionManager = QuickActionManager.shared
     @StateObject private var menuCommands = MenuCommandBus.shared
     @State private var quickActionTarget: QuickActionManager.QuickAction?
+    /// Snapshot from a restore that didn't finish, offered back to the user.
+    @State private var pendingRecovery: Data?
+    @State private var recoveryFailed = false
     @State private var isUnlocked: Bool = false
 
     var unarchivedVehicles: [Vehicle] { vehicles.filter { !$0.isArchived } }
@@ -142,6 +145,32 @@ struct ContentView: View {
                 if target == .addFuel { NavigationStack { AddFillUpView(vehicle: vehicle) } }
                 else if target == .addService { NavigationStack { AddServiceView(vehicle: vehicle) } }
             }
+        }
+        // A snapshot still on disk means a restore didn't finish, so offer it back
+        // rather than leaving the user to find the file themselves.
+        .task { pendingRecovery = FullBackup.pendingSafetyCopy }
+        .alert("Finish Restoring?", isPresented: Binding(
+            get: { pendingRecovery != nil },
+            set: { if !$0 { pendingRecovery = nil } }
+        )) {
+            Button("Recover Previous Data") {
+                guard let data = pendingRecovery else { return }
+                pendingRecovery = nil
+                do { try FullBackup.restore(from: data, context: modelContext) }
+                catch { recoveryFailed = true }
+            }
+            Button("Keep Current Data", role: .destructive) {
+                FullBackup.discardSafetyCopy()
+                pendingRecovery = nil
+            }
+            Button("Decide Later", role: .cancel) { pendingRecovery = nil }
+        } message: {
+            Text("A restore didn't finish last time, so some logs may be missing. Fuel Log saved a copy of everything from just before it started.")
+        }
+        .alert("Recovery Failed", isPresented: $recoveryFailed) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("The saved copy couldn't be restored. It's been kept, so Fuel Log will offer it again next time you open the app.")
         }
         // Vehicle switching lives here, since this is where the selection is held.
         .onChange(of: menuCommands.pending) { _, command in
