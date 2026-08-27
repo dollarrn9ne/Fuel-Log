@@ -663,7 +663,12 @@ struct DashboardSheetContent: View {
             case .showTrips: showingTrips = true
             case .showSettings: showingSettings = true
             case .showArchivedVehicles: showingArchivedVehicles = true
-            default: return
+            default:
+                // Export and report flows live in Settings; open it and let it
+                // pick the action up as it appears.
+                guard let command, let action = MenuCommandBus.settingsAction(for: command) else { return }
+                sheetMenuCommands.pendingSettingsAction = action
+                showingSettings = true
             }
             if let command { sheetMenuCommands.consume(command) }
         }

@@ -18,6 +18,7 @@ struct SettingsView: View {
     @State private var selectedEncoding: ExportEncoding = .utf8
     @State private var showFileExporter = false
     @State private var showFileImporter = false
+    @StateObject private var menuCommands = MenuCommandBus.shared
     @State private var showingImportSourcePicker = false
     @State private var showingExportVehiclePicker = false
     @State private var showingTaxReportSheet = false
@@ -200,6 +201,19 @@ struct SettingsView: View {
             Section { NavigationLink(destination: AboutView()) { Text("About Fuel Log") } }
         }
         .navigationTitle("Settings").toolbar { ToolbarItem(placement: .cancellationAction) { Button { dismiss() } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.primary).font(.title3) } } }
+        // A File menu command opens Settings with an action waiting; run it once
+        // this view exists, since the exporters and importers below belong to it.
+        .task {
+            guard let action = menuCommands.pendingSettingsAction else { return }
+            menuCommands.pendingSettingsAction = nil
+            switch action {
+            case .exportBackup: await generateLocalBackup()
+            case .exportCSV: showingExportVehiclePicker = true
+            case .importCSV: showingImportSourcePicker = true
+            case .taxReport: showingTaxReportSheet = true
+            case .serviceReport: showingServiceReportSheet = true
+            }
+        }
         .fileExporter(isPresented: $showFileExporter, document: csvDocument, contentType: .commaSeparatedText, defaultFilename: exportFilename) { result in
             if case .success = result {
                 withAnimation { showExportSuccess = true }

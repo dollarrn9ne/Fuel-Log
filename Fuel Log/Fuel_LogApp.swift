@@ -55,9 +55,31 @@ final class MenuCommandBus: ObservableObject {
         case toggleSatellite
         case showCharts, showTrips, showSettings, showArchivedVehicles
         case nextVehicle, previousVehicle
+        /// Handled by opening Settings with `pendingSettingsAction` set.
+        case exportBackup, exportCSV, importCSV, taxReport, serviceReport
     }
 
+    /// The export and import flows are @State inside SettingsView, with their
+    /// fileExporter and fileImporter attached there, so they only exist while
+    /// Settings is on screen. Rather than duplicate that plumbing at the root
+    /// just to reach it from a menu, the command opens Settings and leaves this
+    /// for SettingsView to pick up as it appears.
+    enum SettingsAction: Equatable { case exportBackup, exportCSV, importCSV, taxReport, serviceReport }
+
     @Published var pending: Command?
+    @Published var pendingSettingsAction: SettingsAction?
+
+    /// The Settings-hosted action a command maps to, if any.
+    static func settingsAction(for command: Command) -> SettingsAction? {
+        switch command {
+        case .exportBackup: return .exportBackup
+        case .exportCSV: return .exportCSV
+        case .importCSV: return .importCSV
+        case .taxReport: return .taxReport
+        case .serviceReport: return .serviceReport
+        default: return nil
+        }
+    }
 
     func send(_ command: Command) { pending = command }
 
@@ -320,6 +342,15 @@ struct Fuel_LogApp: App {
                 Divider()
                 Button("New Vehicle…") { QuickActionManager.shared.requestFromMenu(.addVehicle) }
                     .keyboardShortcut("n", modifiers: [.command, .option])
+                Divider()
+                Button("Export Backup…") { MenuCommandBus.shared.send(.exportBackup) }
+                    .keyboardShortcut("s", modifiers: .command)
+                Button("Export Vehicle Data (CSV)…") { MenuCommandBus.shared.send(.exportCSV) }
+                Button("Import Vehicle Data (CSV)…") { MenuCommandBus.shared.send(.importCSV) }
+                    .keyboardShortcut("o", modifiers: .command)
+                Divider()
+                Button("Tax Report…") { MenuCommandBus.shared.send(.taxReport) }
+                Button("Service Report…") { MenuCommandBus.shared.send(.serviceReport) }
             }
             // Populates View, which the system otherwise renders as the rather
             // unfinished-looking "No Menu Items".
