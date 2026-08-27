@@ -189,8 +189,45 @@ enum FullBackup {
         return try encoder.encode(envelope)
     }
 
+    /// Where the pre-restore snapshot is parked. Left behind if a restore fails
+    /// so the data is recoverable by hand even if the app is killed mid-way.
+    static var safetyCopyURL: URL? {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)
+            .first?.appendingPathComponent("PreRestoreSafetyCopy.json")
+    }
+
+    /// Restores a backup, replacing everything currently stored.
+    ///
+    /// The deletes below are batch operations that hit the store immediately, so
+    /// once they run there is nothing to fall back on if the rebuild then fails.
+    /// The current contents are therefore snapshotted first: kept in memory to
+    /// roll back from, and written to disk so a crash mid-restore is still
+    /// recoverable. The file is removed once the restore succeeds.
+    ///
+    /// Decoding happens before any of that, so a corrupt or future-format file
+    /// throws without touching the store at all.
     @discardableResult
     static func restore(from data: Data, context: ModelContext) throws -> Int {
+        let envelope = try decodeEnvelope(from: data)
+        let safetyCopy = try? exportData(context: context)
+        if let safetyCopy, let url = safetyCopyURL { try? safetyCopy.write(to: url, options: .atomic) }
+
+        do {
+            try apply(envelope, context: context)
+        } catch {
+            // Put back what was there. Best effort: if this fails too, the file
+            // written above is the remaining route back.
+            if let safetyCopy, let previous = try? decodeEnvelope(from: safetyCopy) {
+                try? apply(previous, context: context)
+            }
+            throw error
+        }
+
+        if let url = safetyCopyURL { try? FileManager.default.removeItem(at: url) }
+        return envelope.vehicles.count
+    }
+
+    private static func decodeEnvelope(from data: Data) throws -> BackupEnvelope {
         let envelope: BackupEnvelope
         do {
             envelope = try decoder.decode(BackupEnvelope.self, from: data)
@@ -198,7 +235,12 @@ enum FullBackup {
             throw BackupError.invalidData
         }
         guard envelope.formatVersion == currentFormatVersion else { throw BackupError.unsupportedFormat }
+        return envelope
+    }
 
+    /// Replaces the store's contents with the envelope's. Assumes the caller has
+    /// already decoded and snapshotted.
+    private static func apply(_ envelope: BackupEnvelope, context: ModelContext) throws {
         try context.delete(model: Vehicle.self)
         try context.delete(model: Trip.self)
         try context.delete(model: TripCategory.self)
@@ -269,6 +311,5 @@ enum FullBackup {
         }
 
         try context.save()
-        return envelope.vehicles.count
     }
 }
