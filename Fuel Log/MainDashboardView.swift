@@ -609,7 +609,7 @@ struct DashboardSheetContent: View {
                     
                     HStack {
                         Image(systemName: "magnifyingglass").foregroundColor(.secondary)
-                        TextField("Search logs...", text: $searchText)
+                        TextField("Search name, date, mileage...", text: $searchText)
                     }
                     .padding(10)
                     .applyLiquidGlassOrBackground(cornerRadius: 12, fallbackColor: .tertiarySystemGroupedBackground)
@@ -809,14 +809,51 @@ struct DashboardSheetContent: View {
         
         if searchText.isEmpty { return baseEvents }
         let lower = searchText.localizedLowercase
-        return baseEvents.filter { ev in
-            switch ev {
-            case .fillUp(let f):
-                return f.location?.name.localizedLowercase.contains(lower) == true || f.notes.localizedLowercase.contains(lower)
-            case .service(let s):
-                return s.location?.name.localizedLowercase.contains(lower) == true || s.notes.localizedLowercase.contains(lower) || s.type.rawValue.localizedLowercase.contains(lower)
-            }
+        return baseEvents.filter { searchHaystack(for: $0).contains(lower) }
+    }
+
+    /// Everything a log row displays, lowercased and run together, so the search
+    /// box matches what the user can actually see. It previously only looked at
+    /// the location name, notes and service type, so searching for a date or an
+    /// odometer reading - both printed right there on the row - found nothing.
+    private func searchHaystack(for event: VehicleEvent) -> String {
+        var parts: [String] = []
+
+        // Several spellings of the same date, so "aug", "august 19", "8/19" and
+        // "2026" all match the one entry.
+        let date = event.date
+        parts.append(date.formatted(date: .abbreviated, time: .omitted))
+        parts.append(date.formatted(date: .long, time: .omitted))
+        parts.append(date.formatted(.dateTime.month(.defaultDigits).day().year()))
+
+        switch event {
+        case .fillUp(let f):
+            parts.append(f.location?.name ?? "")
+            parts.append(f.notes)
+            parts.append(f.effectiveGradeName ?? "")
+            if let odo = f.odometer { parts.append(numberSpellings(odo)) }
+            parts.append(numberSpellings(f.totalCost))
+            parts.append(numberSpellings(f.volume))
+        case .service(let s):
+            parts.append(s.location?.name ?? "")
+            parts.append(s.notes)
+            parts.append(s.type.rawValue)
+            parts.append(numberSpellings(s.odometer))
+            parts.append(numberSpellings(s.cost))
         }
+
+        return parts.joined(separator: " ").localizedLowercase
+    }
+
+    /// A number both with and without grouping separators, since the row prints
+    /// "1,300" but people type "1300".
+    private func numberSpellings(_ value: Double) -> String {
+        let whole = Int(value.rounded())
+        // A set, because below 1,000 the grouped and plain forms are identical.
+        var forms: Set<String> = ["\(whole)", whole.formatted()]
+        // Keep the decimals for values that have them, e.g. a 12.4 gallon fill.
+        if value != value.rounded() { forms.insert(String(format: "%.2f", value)) }
+        return forms.joined(separator: " ")
     }
     
     @ViewBuilder
