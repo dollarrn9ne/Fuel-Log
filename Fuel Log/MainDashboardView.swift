@@ -808,8 +808,27 @@ struct DashboardSheetContent: View {
         }
         
         if searchText.isEmpty { return baseEvents }
-        let lower = searchText.localizedLowercase
+        // Strip grouping separators from the query rather than emitting a second
+        // grouped spelling of every number: one normalisation here beats two
+        // formatter calls per number per row.
+        let separator = Locale.current.groupingSeparator ?? ","
+        let lower = searchText.replacingOccurrences(of: separator, with: "").localizedLowercase
+        guard !lower.isEmpty else { return baseEvents }
         return baseEvents.filter { searchHaystack(for: $0).contains(lower) }
+    }
+
+    // Reused rather than rebuilt per call. `Date.formatted` constructs a format
+    // style every time, and at three dates per row it dominated the cost of
+    // filtering - noticeable once a vehicle has years of history behind it.
+    private static let mediumDateFormatter = dateFormatter(.medium)
+    private static let longDateFormatter = dateFormatter(.long)
+    private static let shortDateFormatter = dateFormatter(.short)
+
+    private static func dateFormatter(_ style: DateFormatter.Style) -> DateFormatter {
+        let formatter = DateFormatter()
+        formatter.dateStyle = style
+        formatter.timeStyle = .none
+        return formatter
     }
 
     /// Everything a log row displays, lowercased and run together, so the search
@@ -822,9 +841,9 @@ struct DashboardSheetContent: View {
         // Several spellings of the same date, so "aug", "august 19", "8/19" and
         // "2026" all match the one entry.
         let date = event.date
-        parts.append(date.formatted(date: .abbreviated, time: .omitted))
-        parts.append(date.formatted(date: .long, time: .omitted))
-        parts.append(date.formatted(.dateTime.month(.defaultDigits).day().year()))
+        parts.append(Self.mediumDateFormatter.string(from: date))
+        parts.append(Self.longDateFormatter.string(from: date))
+        parts.append(Self.shortDateFormatter.string(from: date))
 
         switch event {
         case .fillUp(let f):
@@ -845,15 +864,14 @@ struct DashboardSheetContent: View {
         return parts.joined(separator: " ").localizedLowercase
     }
 
-    /// A number both with and without grouping separators, since the row prints
-    /// "1,300" but people type "1300".
+    /// Plain digits only. The query has its grouping separators stripped before
+    /// comparison, so there's no need to also spell "1,300" here - and string
+    /// interpolation avoids the number formatter entirely.
     private func numberSpellings(_ value: Double) -> String {
         let whole = Int(value.rounded())
-        // A set, because below 1,000 the grouped and plain forms are identical.
-        var forms: Set<String> = ["\(whole)", whole.formatted()]
         // Keep the decimals for values that have them, e.g. a 12.4 gallon fill.
-        if value != value.rounded() { forms.insert(String(format: "%.2f", value)) }
-        return forms.joined(separator: " ")
+        guard value != value.rounded() else { return "\(whole)" }
+        return "\(whole) \(String(format: "%.2f", value))"
     }
     
     @ViewBuilder
