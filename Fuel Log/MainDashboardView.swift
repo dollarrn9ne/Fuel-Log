@@ -122,16 +122,28 @@ struct MainDashboardView: View {
         return Self.smallestSheetFraction
     }
 
-    /// A roomy window puts the content beside the map in landscape, where there's
-    /// width to spare, and along the bottom in portrait, where there isn't.
+    /// Width the side panel needs before it earns its place: 420pt of panel plus
+    /// enough map beside it to still be worth looking at. Sits between iPad
+    /// portrait (1024pt, card) and iPad mini landscape (1133pt, panel).
+    private static let sidePanelMinimumWidth: CGFloat = 1080
+    /// Extra shrink required to give the side panel up once it's shown, so a
+    /// window parked on the threshold doesn't flicker between layouts.
+    private static let layoutSwitchHysteresis: CGFloat = 60
+    private static let layoutChangeAnimation: Animation = .smooth(duration: 0.3)
+
+    /// Which arrangement suits the window.
     ///
-    /// Portrait gets an inline panel rather than the system sheet: at regular
-    /// width iOS draws a sheet as a centred card of fixed width, floating well up
-    /// the screen. An inline panel is the only way to get one that spans the full
-    /// width and sits on the bottom edge.
+    /// Keyed on width, not the aspect ratio it used to compare. Aspect meant a
+    /// near-square window flipped between the side panel and the card on a tiny
+    /// drag - and near-square is exactly where windows get parked - so resizing
+    /// walked through every layout in turn. Width asks the question that actually
+    /// matters: is there room for a panel beside the map.
     private func layout(_ proxy: GeometryProxy) -> DashboardLayout {
         guard horizontalSizeClass == .regular else { return .bottomSheet }
-        return proxy.size.width > proxy.size.height ? .sidePanel : .bottomPanel
+        let threshold = layoutMode == .sidePanel
+            ? Self.sidePanelMinimumWidth - Self.layoutSwitchHysteresis
+            : Self.sidePanelMinimumWidth
+        return proxy.size.width >= threshold ? .sidePanel : .bottomPanel
     }
 
     /// Portrait shows a card floating clear of the edges with the map visible all
@@ -265,7 +277,9 @@ struct MainDashboardView: View {
         }
         .onAppear { layoutMode = layout(proxy) }
         .onChange(of: layout(proxy)) { _, mode in
-            layoutMode = mode
+            // Animated so a resize crossing the threshold reads as the panel
+            // moving rather than one layout being swapped for another.
+            withAnimation(Self.layoutChangeAnimation) { layoutMode = mode }
             // Deferred a turn on purpose. Reading layoutMode straight after
             // writing it still yields the old value, so refitMap would pick the
             // previous layout's branch - rotating to landscape framed the pins as
