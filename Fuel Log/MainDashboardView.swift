@@ -47,7 +47,6 @@ struct MainDashboardView: View {
     @StateObject private var locationManager = CurrentLocationManager()
     @State private var isMapReady = false
     @StateObject private var menuCommands = MenuCommandBus.shared
-    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var layoutMode: DashboardLayout = .bottomSheet
     /// Settled height of the portrait card, as a fraction of the screen.
     @State private var cardHeightFraction: CGFloat = 0.34
@@ -133,13 +132,20 @@ struct MainDashboardView: View {
 
     /// Which arrangement suits the window.
     ///
-    /// Keyed on width, not the aspect ratio it used to compare. Aspect meant a
-    /// near-square window flipped between the side panel and the card on a tiny
-    /// drag - and near-square is exactly where windows get parked - so resizing
-    /// walked through every layout in turn. Width asks the question that actually
-    /// matters: is there room for a panel beside the map.
+    /// Two layouts on iPad, one on iPhone - never three. Gating the sheet on the
+    /// size class meant a narrowed iPad window became compact and swapped to the
+    /// sheet, so resizing walked card -> sheet on top of card -> panel. Three
+    /// styles for one drag.
+    ///
+    /// Keyed on the idiom rather than the size class for exactly that reason: a
+    /// narrow iPad window is still an iPad, and the card suits it. The sheet is
+    /// kept for iPhone, where its detents are tuned and the shape is right.
+    ///
+    /// The panel-vs-card choice is width, not the aspect ratio it once compared.
+    /// Aspect flipped a near-square window on a tiny drag, and near-square is
+    /// exactly where windows get parked.
     private func layout(_ proxy: GeometryProxy) -> DashboardLayout {
-        guard horizontalSizeClass == .regular else { return .bottomSheet }
+        guard UIDevice.current.userInterfaceIdiom == .pad else { return .bottomSheet }
         let threshold = layoutMode == .sidePanel
             ? Self.sidePanelMinimumWidth - Self.layoutSwitchHysteresis
             : Self.sidePanelMinimumWidth
@@ -370,7 +376,12 @@ struct MainDashboardView: View {
     private func bottomPanel(_ proxy: GeometryProxy) -> some View {
         let full = fullHeight(proxy)
         let cardShape = RoundedRectangle(cornerRadius: 28, style: .continuous)
-        let width = min(max(proxy.size.width * Self.bottomCardWidthFraction, Self.bottomCardMinWidth), Self.bottomCardMaxWidth)
+        // Clamped to what's actually there as well as to the preferred range: a
+        // narrowed iPad window can be slimmer than the 360pt floor, and the card
+        // should shrink with it rather than overflow the edges.
+        let available = max(proxy.size.width - Self.bottomCardMargin * 2, 1)
+        let preferred = min(max(proxy.size.width * Self.bottomCardWidthFraction, Self.bottomCardMinWidth), Self.bottomCardMaxWidth)
+        let width = min(preferred, available)
         return VStack(spacing: 0) {
             bottomCardPullBar(full: full)
             DashboardSheetContent(colorScheme: _colorScheme, vehicle: vehicle, allVehicles: allVehicles, events: timelineEvents, onSelectVehicle: onSelectVehicle, newReportMonth: newReportMonth, onAcknowledgeReport: onAcknowledgeReport, selectedLogTab: $selectedLogTab, sheetDetent: .constant(.large))
