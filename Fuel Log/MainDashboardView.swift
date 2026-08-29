@@ -50,8 +50,6 @@ struct MainDashboardView: View {
     @State private var layoutMode: DashboardLayout = .bottomSheet
     /// Settled height of the portrait card, as a fraction of the screen.
     @State private var cardHeightFraction: CGFloat = 0.34
-    /// Live height while the pull bar is being dragged; nil when settled.
-    @State private var cardDragHeight: CGFloat?
 
     /// Where the dashboard content sits relative to the map.
     private enum DashboardLayout { case bottomSheet, sidePanel, bottomPanel }
@@ -164,8 +162,6 @@ struct MainDashboardView: View {
     private static let bottomCardMinWidth: CGFloat = 360
     private static let bottomCardMaxWidth: CGFloat = 560
     private static let bottomCardMargin: CGFloat = 20
-    /// Height granularity while dragging, in points. See bottomCardPullBar.
-    private static let cardDragStep: CGFloat = 8
 
     /// Share of the height covered by whatever sits over the map's bottom.
     private var occludedFraction: CGFloat {
@@ -386,17 +382,10 @@ struct MainDashboardView: View {
             bottomCardPullBar(full: full)
             DashboardSheetContent(colorScheme: _colorScheme, vehicle: vehicle, allVehicles: allVehicles, events: timelineEvents, onSelectVehicle: onSelectVehicle, newReportMonth: newReportMonth, onAcknowledgeReport: onAcknowledgeReport, selectedLogTab: $selectedLogTab, sheetDetent: .constant(.large))
         }
-            .frame(width: width, height: cardDragHeight ?? full * cardHeightFraction)
+            .frame(width: width, height: full * cardHeightFraction)
             .background { panelBackground(in: cardShape, frosted: true) }
             .clipShape(cardShape)
-            // No shadow mid-drag. It has to be recomputed against the card's
-            // silhouette every time the height changes, and it is invisible under
-            // a moving finger anyway.
-            .shadow(color: .black.opacity(cardDragHeight == nil ? 0.18 : 0), radius: 14, y: 4)
-            // The live height is the finger's position, not an animated value.
-            // Any implicit animation in scope would try to interpolate towards a
-            // target that moves again next frame, which reads as stutter.
-            .animation(nil, value: cardDragHeight)
+            .shadow(color: .black.opacity(0.18), radius: 14, y: 4)
             // Even margin on every side. The overlay measures against the full
             // screen, since a sibling in the ZStack ignores the safe area so the
             // map can bleed to the edges - so this is a true 20pt from each
@@ -408,9 +397,12 @@ struct MainDashboardView: View {
 
     /// Drags the card between its resting height and the half-screen ceiling.
     ///
-    /// Only the card's own height follows the finger. The map's inset waits for
-    /// release: re-framing the camera on every gesture update is what made the
-    /// resizable side panel jitter.
+    /// Snaps to the nearer height as the finger passes the midpoint rather than
+    /// tracking it point for point. Every distinct height re-lays out the whole
+    /// card - the log list included - and re-renders the glass at a new size, so
+    /// following the finger meant a layout pass per frame, which is what the
+    /// jitter was. Quantising the height only reduced the count; snapping makes
+    /// it one pass per drag, and the animation covers the change.
     private func bottomCardPullBar(full: CGFloat) -> some View {
         Capsule()
             .fill(.secondary.opacity(0.6))
@@ -420,30 +412,26 @@ struct MainDashboardView: View {
             .padding(.bottom, 2)
             .contentShape(Rectangle())
             .gesture(
-                DragGesture()
+                DragGesture(minimumDistance: 4)
                     .onChanged { value in
-                        let settled = full * cardHeightFraction
-                        let target = min(
-                            max(settled - value.translation.height, full * Self.bottomCardRestingHeightFraction),
-                            full * Self.bottomCardMaxHeightFraction
-                        )
-                        // Quantised. Every distinct height re-lays out the whole
-                        // card - the log list included - and re-renders the glass
-                        // at a new size, so following the finger point for point
-                        // meant a full layout pass per frame. Rounding to a step
-                        // cuts that by roughly an order of magnitude and is not
-                        // perceptible while dragging.
-                        let stepped = (target / Self.cardDragStep).rounded() * Self.cardDragStep
-                        if stepped != cardDragHeight { cardDragHeight = stepped }
+                        let target = (full * cardHeightFraction - value.translation.height) / full
+                        let snapped = Self.nearestCardFraction(to: target)
+                        // Assigning unconditionally would restart the animation on
+                        // every update once the finger is past the midpoint.
+                        guard snapped != cardHeightFraction else { return }
+                        cardHeightFraction = snapped
                     }
                     .onEnded { _ in
-                        cardHeightFraction = (cardDragHeight ?? full * cardHeightFraction) / full
-                        cardDragHeight = nil
                         // Deferred so refitMap sees the fraction just written.
                         Task { refitMap(containerHeight: full) }
                     }
             )
             .accessibilityLabel("Resize card")
+    }
+
+    private static func nearestCardFraction(to fraction: CGFloat) -> CGFloat {
+        let heights = [bottomCardRestingHeightFraction, bottomCardMaxHeightFraction]
+        return heights.min { abs($0 - fraction) < abs($1 - fraction) } ?? bottomCardRestingHeightFraction
     }
 
     private func refitMap(containerHeight: CGFloat, refreshZoom: Bool = false) {
