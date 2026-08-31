@@ -49,158 +49,52 @@ struct SettingsView: View {
     @State private var showImportSuccess = false
     @State private var showingBiometricError = false
     @State private var unlockMethodName = "Face ID / Touch ID"
+    /// Sidebar selection on iPad. Unused on iPhone, which shows every section.
+    @State private var selectedSection: SettingsSection? = .appearance
     
-    var body: some View {
-        Form {
-            Section("Appearance") { Picker("Theme", selection: $appTheme) { ForEach(AppTheme.allCases) { theme in Text(theme.rawValue).tag(theme) } } }
-            Section(header: Text("Backup & Restore")) {
-                HStack {
-                    Image(systemName: syncManager.status.icon)
-                        .foregroundStyle(syncManager.status.tintColor)
-                        .font(.title2)
-                    VStack(alignment: .leading) {
-                        Text(syncManager.status.label).font(.headline)
-                        Text(syncManager.status.detail).font(.caption).foregroundStyle(.secondary)
-                    }
-                }.padding(.vertical, 4)
-                
-                if isCloudUsable {
-                    LabeledContent {
-                        HStack(spacing: 12) {
-                            Text(lastSyncedText)
-                                .foregroundStyle(.secondary)
-                            Button {
-                                Task { await syncNow() }
-                            } label: {
-                                HStack(spacing: 4) {
-                                    Text("Sync Now")
-                                    if syncManager.status.isBusy {
-                                        ProgressView().controlSize(.small)
-                                    }
-                                }
-                            }
-                            .disabled(syncManager.status.isBusy)
-                        }
-                    } label: {
-                        Text("Last Synced")
-                    }
-                }
-                
-                Button {
-                    Task { await generateLocalBackup() }
-                } label: {
-                    Label("Local Backup", systemImage: "square.and.arrow.up")
-                }
-                .disabled(isBackingUp || isRestoring)
-                
-                Button {
-                    showingRestoreConfirmation = true
-                } label: {
-                    Label("Local Restore", systemImage: "square.and.arrow.down")
-                }
-                .disabled(isBackingUp || isRestoring)
-            }
-            
-            Section(header: Text("Security")) {
-                Toggle("Require \(unlockMethodName)", isOn: Binding(
-                    get: { appLockEnabled },
-                    set: { newValue in
-                        if newValue {
-                            let context = LAContext()
-                            var error: NSError?
-                            if context.canEvaluatePolicy(.deviceOwnerAuthentication, error: &error) {
-                                context.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: "Enable App Lock") { success, _ in
-                                    DispatchQueue.main.async {
-                                        if success {
-                                            appLockEnabled = true
-                                        }
-                                    }
-                                }
-                            } else {
-                                showingBiometricError = true
-                            }
-                        } else {
-                            appLockEnabled = false
-                        }
-                    }
-                ))
-            }
-            
-            Section(header: Text("Smart Notifications")) {
-                Toggle("Maintenance Reminders", isOn: $smartRemindersEnabled)
-                    .onChange(of: smartRemindersEnabled) { _, isEnabled in
-                        if isEnabled {
-                            SmartRemindersManager.shared.requestPermission { granted in
-                                Task { @MainActor in
-                                    if granted {
-                                        for v in vehicles {
-                                            SmartRemindersManager.shared.updateReminders(for: v)
-                                        }
-                                    } else {
-                                        smartRemindersEnabled = false
-                                    }
-                                }
-                            }
-                        } else {
-                            UNUserNotificationCenter.current().removeAllPendingNotificationRequests()
-                        }
-                    }
-                if smartRemindersEnabled {
-                    Text("We remind you when your next service is due; whichever comes first: distance (e.g., 5,000 mi) or time (e.g., 6 months). All predictions run privately, on-device.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                Toggle("Fill-Up Live Activity", isOn: $liveActivityEnabled)
-                Text("While you enter a fill-up, the running total appears on the lock screen and Dynamic Island. Turn off to stop starting new Live Activities.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            
-            Section("Reports") {
-                Text("Export a formatted report of trips, mileage, and expenses for tax purposes, or export your service records as proof of maintenance upkeep; ideal when selling the car.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                
-                Button { showingTaxReportSheet = true } label: { Label("Export Tax Report", systemImage: "doc.text.fill") }
-                
-                Button { showingServiceReportSheet = true } label: { Label("Export Service Report", systemImage: "wrench.and.screwdriver.fill") }
-            }
-            
-            Section("Import & Export") {
-                Text("Import data from another app, or export your data to use in another app.").font(.caption).foregroundStyle(.secondary)
-                Picker("CSV Text Encoding", selection: $selectedEncoding) { ForEach(ExportEncoding.allCases) { enc in Text(enc.rawValue).tag(enc) } }
-                
-                Button { showingExportVehiclePicker = true } label: { Label("Export Vehicle Data (CSV)", systemImage: "square.and.arrow.up") }
-                .confirmationDialog("Select Vehicle to Export", isPresented: $showingExportVehiclePicker, titleVisibility: .visible) {
-                    Button("All Vehicles") { Task { await generateCSV(for: nil) } }
-                    ForEach(vehicles) { vehicle in Button("\(vehicle.name)\(vehicle.isArchived ? " (Archived)" : "")") { Task { await generateCSV(for: vehicle) } } }
-                    Button("Cancel", role: .cancel) {}
-                } message: { Text("Choose which vehicle's logs to export, or export them all together.") }
-                
-                Button { showingImportSourcePicker = true } label: { Label("Import Vehicle Data (CSV)", systemImage: "square.and.arrow.down") }
-                .confirmationDialog("Select Source App", isPresented: $showingImportSourcePicker, titleVisibility: .visible) {
-                    ForEach(ImportSource.allCases) { source in Button(source.rawValue) { pendingImportSource = source; showFileImporter = true } }
-                    Button("Cancel", role: .cancel) {}
-                } message: { Text("Select the app that generated your CSV so it can be formatted correctly.") }
-            }
-            
-            Section("Sharing") {
-                NavigationLink { SharedLinksView() } label: {
-                    Label("Shared Vehicles", systemImage: "person.2.fill")
-                }
-                Text("Share a vehicle so someone borrowing it can log fuel from the App Clip, and their entries sync back to you. Manage or revoke your shared links here.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
+    /// Settings categories, shown as the iPad sidebar.
+    private enum SettingsSection: String, CaseIterable, Identifiable {
+        case appearance, backup, security, notifications, reports, transfer, sharing, danger, about
 
-            Section(header: Text("Danger Zone")) {
-                Button(role: .destructive) { showingPurgeConfirmation = true } label: { Label("Erase All App Data", systemImage: "trash.fill") }
-                .alert("Erase All App Data?", isPresented: $showingPurgeConfirmation) { Button("Cancel", role: .cancel) {}; Button("Erase Everything", role: .destructive) { purgeAllData() } } message: { Text("This will permanently delete all vehicles, trips, categories, and logs. This action cannot be undone.") }
+        var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .appearance: return "Appearance"
+            case .backup: return "Backup & Restore"
+            case .security: return "Security"
+            case .notifications: return "Notifications"
+            case .reports: return "Reports"
+            case .transfer: return "Import & Export"
+            case .sharing: return "Sharing"
+            case .danger: return "Danger Zone"
+            case .about: return "About"
             }
-            
-            Section { NavigationLink(destination: AboutView()) { Text("About Fuel Log") } }
         }
-        .navigationTitle("Settings").toolbar { ToolbarItem(placement: .cancellationAction) { Button { dismiss() } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.primary).font(.title3) } } }
+
+        var icon: String {
+            switch self {
+            case .appearance: return "paintbrush.fill"
+            case .backup: return "arrow.triangle.2.circlepath"
+            case .security: return "lock.fill"
+            case .notifications: return "bell.badge.fill"
+            case .reports: return "doc.text.fill"
+            case .transfer: return "square.and.arrow.up.on.square.fill"
+            case .sharing: return "person.2.fill"
+            case .danger: return "exclamationmark.triangle.fill"
+            case .about: return "info.circle.fill"
+            }
+        }
+    }
+
+    var body: some View {
+        Group {
+            if UIDevice.current.userInterfaceIdiom == .pad {
+                padLayout
+            } else {
+                phoneLayout
+            }
+        }
         // A File menu command opens Settings with an action waiting; run it once
         // this view exists, since the exporters and importers below belong to it.
         .task {
@@ -298,6 +192,256 @@ struct SettingsView: View {
             syncManager.loadPersistedLastSync()
             await syncManager.checkStatus()
         }
+    }
+
+    /// One scrolling Form. Right for a narrow screen, where a sidebar would only
+    /// add a level to dive through.
+    private var phoneLayout: some View {
+        NavigationStack {
+            Form {
+                appearanceSection
+                backupSection
+                securitySection
+                notificationsSection
+                reportsSection
+                transferSection
+                sharingSection
+                dangerSection
+                aboutSection
+            }
+            .navigationTitle("Settings")
+            .toolbar { closeButton }
+        }
+    }
+
+    /// Categories in a sidebar with their controls alongside, rather than one long
+    /// form scaled up from the phone.
+    private var padLayout: some View {
+        NavigationSplitView {
+            List(SettingsSection.allCases, selection: $selectedSection) { section in
+                Label {
+                    Text(section.title)
+                } icon: {
+                    // Red for the destructive one, so the sidebar warns before
+                    // the pane does.
+                    Image(systemName: section.icon)
+                        .foregroundStyle(section == .danger ? Color.red : Color.accentColor)
+                }
+                .tag(section)
+            }
+            .navigationTitle("Settings")
+            .toolbar { closeButton }
+        } detail: {
+            // Its own stack, so the Sharing and About rows can still push.
+            NavigationStack {
+                Form { sectionContent(for: selectedSection ?? .appearance) }
+                    .navigationTitle((selectedSection ?? .appearance).title)
+                    .navigationBarTitleDisplayMode(.inline)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func sectionContent(for section: SettingsSection) -> some View {
+        switch section {
+        case .appearance: appearanceSection
+        case .backup: backupSection
+        case .security: securitySection
+        case .notifications: notificationsSection
+        case .reports: reportsSection
+        case .transfer: transferSection
+        case .sharing: sharingSection
+        case .danger: dangerSection
+        case .about: aboutSection
+        }
+    }
+
+    /// Blank on iPad, where the pane's navigation title already names the
+    /// section and repeating it reads as a mistake. iPhone keeps the header,
+    /// since there every section shares one screen.
+    private func sectionHeader(_ title: String) -> Text {
+        UIDevice.current.userInterfaceIdiom == .pad ? Text("") : Text(title)
+    }
+
+    private var closeButton: some ToolbarContent {
+        ToolbarItem(placement: .cancellationAction) {
+            Button { dismiss() } label: {
+                Image(systemName: "xmark.circle.fill").foregroundStyle(.primary).font(.title3)
+            }
+        }
+    }
+
+    // MARK: - Sections
+
+    private var appearanceSection: some View {
+        Section(header: sectionHeader("Appearance")) {
+            Picker("Theme", selection: $appTheme) { ForEach(AppTheme.allCases) { theme in Text(theme.rawValue).tag(theme) } }
+        }
+    }
+
+    @ViewBuilder
+    private var backupSection: some View {
+        Section(header: sectionHeader("Backup & Restore")) {
+                HStack {
+                    Image(systemName: syncManager.status.icon)
+                        .foregroundStyle(syncManager.status.tintColor)
+                        .font(.title2)
+                    VStack(alignment: .leading) {
+                        Text(syncManager.status.label).font(.headline)
+                        Text(syncManager.status.detail).font(.caption).foregroundStyle(.secondary)
+                    }
+                }.padding(.vertical, 4)
+                
+                if isCloudUsable {
+                    LabeledContent {
+                        HStack(spacing: 12) {
+                            Text(lastSyncedText)
+                                .foregroundStyle(.secondary)
+                            Button {
+                                Task { await syncNow() }
+                            } label: {
+                                HStack(spacing: 4) {
+                                    Text("Sync Now")
+                                    if syncManager.status.isBusy {
+                                        ProgressView().controlSize(.small)
+                                    }
+                                }
+                            }
+                            .disabled(syncManager.status.isBusy)
+                        }
+                    } label: {
+                        Text("Last Synced")
+                    }
+                }
+                
+                Button {
+                    Task { await generateLocalBackup() }
+                } label: {
+                    Label("Local Backup", systemImage: "square.and.arrow.up")
+                }
+                .disabled(isBackingUp || isRestoring)
+                
+                Button {
+                    showingRestoreConfirmation = true
+                } label: {
+                    Label("Local Restore", systemImage: "square.and.arrow.down")
+                }
+                .disabled(isBackingUp || isRestoring)
+        }
+    }
+
+    private var securitySection: some View {
+        Section(header: sectionHeader("Security")) {
+                Toggle("Require \(unlockMethodName)", isOn: Binding(
+                    get: { appLockEnabled },
+                    set: { newValue in
+                        if newValue {
+                            let context = LAContext()
+                            var error: NSError?
+                            if context.canEvaluatePolicy(.deviceOwnerAuthentication, error: &error) {
+                                context.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: "Enable App Lock") { success, _ in
+                                    DispatchQueue.main.async {
+                                        if success {
+                                            appLockEnabled = true
+                                        }
+                                    }
+                                }
+                            } else {
+                                showingBiometricError = true
+                            }
+                        } else {
+                            appLockEnabled = false
+                        }
+                    }
+                ))
+        }
+    }
+
+    @ViewBuilder
+    private var notificationsSection: some View {
+        Section(header: sectionHeader("Smart Notifications")) {
+                Toggle("Maintenance Reminders", isOn: $smartRemindersEnabled)
+                    .onChange(of: smartRemindersEnabled) { _, isEnabled in
+                        if isEnabled {
+                            SmartRemindersManager.shared.requestPermission { granted in
+                                Task { @MainActor in
+                                    if granted {
+                                        for v in vehicles {
+                                            SmartRemindersManager.shared.updateReminders(for: v)
+                                        }
+                                    } else {
+                                        smartRemindersEnabled = false
+                                    }
+                                }
+                            }
+                        } else {
+                            UNUserNotificationCenter.current().removeAllPendingNotificationRequests()
+                        }
+                    }
+                if smartRemindersEnabled {
+                    Text("We remind you when your next service is due; whichever comes first: distance (e.g., 5,000 mi) or time (e.g., 6 months). All predictions run privately, on-device.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Toggle("Fill-Up Live Activity", isOn: $liveActivityEnabled)
+                Text("While you enter a fill-up, the running total appears on the lock screen and Dynamic Island. Turn off to stop starting new Live Activities.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+        }
+    }
+
+    private var reportsSection: some View {
+        Section(header: sectionHeader("Reports")) {
+                Text("Export a formatted report of trips, mileage, and expenses for tax purposes, or export your service records as proof of maintenance upkeep; ideal when selling the car.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                
+                Button { showingTaxReportSheet = true } label: { Label("Export Tax Report", systemImage: "doc.text.fill") }
+                
+                Button { showingServiceReportSheet = true } label: { Label("Export Service Report", systemImage: "wrench.and.screwdriver.fill") }
+        }
+    }
+
+    private var transferSection: some View {
+        Section(header: sectionHeader("Import & Export")) {
+                Text("Import data from another app, or export your data to use in another app.").font(.caption).foregroundStyle(.secondary)
+                Picker("CSV Text Encoding", selection: $selectedEncoding) { ForEach(ExportEncoding.allCases) { enc in Text(enc.rawValue).tag(enc) } }
+                
+                Button { showingExportVehiclePicker = true } label: { Label("Export Vehicle Data (CSV)", systemImage: "square.and.arrow.up") }
+                .confirmationDialog("Select Vehicle to Export", isPresented: $showingExportVehiclePicker, titleVisibility: .visible) {
+                    Button("All Vehicles") { Task { await generateCSV(for: nil) } }
+                    ForEach(vehicles) { vehicle in Button("\(vehicle.name)\(vehicle.isArchived ? " (Archived)" : "")") { Task { await generateCSV(for: vehicle) } } }
+                    Button("Cancel", role: .cancel) {}
+                } message: { Text("Choose which vehicle's logs to export, or export them all together.") }
+                
+                Button { showingImportSourcePicker = true } label: { Label("Import Vehicle Data (CSV)", systemImage: "square.and.arrow.down") }
+                .confirmationDialog("Select Source App", isPresented: $showingImportSourcePicker, titleVisibility: .visible) {
+                    ForEach(ImportSource.allCases) { source in Button(source.rawValue) { pendingImportSource = source; showFileImporter = true } }
+                    Button("Cancel", role: .cancel) {}
+                } message: { Text("Select the app that generated your CSV so it can be formatted correctly.") }
+        }
+    }
+
+    private var sharingSection: some View {
+        Section(header: sectionHeader("Sharing")) {
+                NavigationLink { SharedLinksView() } label: {
+                    Label("Shared Vehicles", systemImage: "person.2.fill")
+                }
+                Text("Share a vehicle so someone borrowing it can log fuel from the App Clip, and their entries sync back to you. Manage or revoke your shared links here.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+        }
+    }
+
+    private var dangerSection: some View {
+        Section(header: sectionHeader("Danger Zone")) {
+                Button(role: .destructive) { showingPurgeConfirmation = true } label: { Label("Erase All App Data", systemImage: "trash.fill") }
+                .alert("Erase All App Data?", isPresented: $showingPurgeConfirmation) { Button("Cancel", role: .cancel) {}; Button("Erase Everything", role: .destructive) { purgeAllData() } } message: { Text("This will permanently delete all vehicles, trips, categories, and logs. This action cannot be undone.") }
+        }
+    }
+
+    private var aboutSection: some View {
+        Section { NavigationLink(destination: AboutView()) { Text("About Fuel Log") } }
     }
     
     private var lastSyncedText: String {

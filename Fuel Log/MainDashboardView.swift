@@ -665,7 +665,9 @@ struct DashboardSheetContent: View {
         }
         .sheet(isPresented: $showingMonthlyReport) { NavigationStack { MonthlyReportView(month: monthlyReportMonth, isModal: true) }.roomySheetOnPad() }
         .sheet(isPresented: $showingSettings) {
-            NavigationStack { SettingsView() }
+            // No NavigationStack here: SettingsView supplies its own container,
+            // a split view on iPad and a stack on iPhone.
+            SettingsView()
                 .presentationCompactAdaptation(.fullScreenCover)
                 .roomySheetOnPad()
         }
