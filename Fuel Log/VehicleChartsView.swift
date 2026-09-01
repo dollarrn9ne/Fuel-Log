@@ -173,18 +173,22 @@ struct VehicleChartsView: View {
                             // column of stats beside it, rather than the phone's single
                             // stack widened out with the numbers lost underneath.
                             if isWideLayout(proxy) {
+                                let heights = chartHeights(for: proxy, wide: true)
                                 HStack(alignment: .top, spacing: 20) {
-                                    chartsCard
-                                    VStack(spacing: 20) {
-                                        statsSummaryCard
+                                    chartsCard(priceHeight: heights.price, efficiencyHeight: heights.efficiency)
+                                    VStack(spacing: 16) {
+                                        heroEfficiencyCard
+                                        statsTileGrid
                                         gradeComparisonCard
                                     }
-                                    .frame(width: 340)
+                                    .frame(width: 380)
                                 }
                                 .padding(.horizontal)
+                                .frame(minHeight: proxy.size.height - Self.topControlsAllowance, alignment: .top)
                             } else {
+                                let heights = chartHeights(for: proxy, wide: false)
                                 VStack(spacing: 20) {
-                                    chartsCard
+                                    chartsCard(priceHeight: heights.price, efficiencyHeight: heights.efficiency)
                                     statsSummaryCard
                                     gradeComparisonCard
                                 }
@@ -219,8 +223,26 @@ struct VehicleChartsView: View {
         UIDevice.current.userInterfaceIdiom == .pad && proxy.size.width > 700
     }
 
+    /// Rough height of the timeframe picker plus its vertical padding, so the
+    /// wide layout's minimum height reflects the space actually left over
+    /// rather than the whole screen.
+    private static let topControlsAllowance: CGFloat = 100
+
+    /// Sized off the window rather than fixed, so an iPad's charts read as
+    /// deliberately drawn for the space rather than the phone's small strips
+    /// stretched wide with a slab of empty background beneath them. Capped so
+    /// an external display doesn't blow them up past the point of being
+    /// readable at a glance.
+    private func chartHeights(for proxy: GeometryProxy, wide: Bool) -> (price: CGFloat, efficiency: CGFloat) {
+        guard wide else { return (120, 160) }
+        let available = proxy.size.height - Self.topControlsAllowance
+        let price = min(max(available * 0.24, 200), 320)
+        let efficiency = min(max(available * 0.34, 260), 460)
+        return (price, efficiency)
+    }
+
     @ViewBuilder
-    private var chartsCard: some View {
+    private func chartsCard(priceHeight: CGFloat, efficiencyHeight: CGFloat) -> some View {
         VStack(spacing: 0) {
             // Price Chart
             syncableChart(
@@ -252,7 +274,7 @@ struct VehicleChartsView: View {
                         AxisGridLine()
                     }
                 }
-                .frame(height: 120)
+                .frame(height: priceHeight)
                 .overlay(alignment: .topLeading) {
                     Text("\(vehicle.currencyRaw)/\(vehicle.fuelUnit.rawValue.prefix(3).lowercased())")
                         .font(.caption.weight(.bold))
@@ -294,7 +316,7 @@ struct VehicleChartsView: View {
                         AxisValueLabel(format: .dateTime.month(.abbreviated).year(.twoDigits))
                     }
                 }
-                .frame(height: 160)
+                .frame(height: efficiencyHeight)
                 .overlay(alignment: .topLeading) {
                     Text(vehicle.efficiencyUnit.rawValue)
                         .font(.caption.weight(.bold))
@@ -306,6 +328,60 @@ struct VehicleChartsView: View {
         .padding(.top, 8)
         .padding(.bottom, 16)
         .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
+    }
+
+    /// The iPad column's headline number, in its own card rather than stacked
+    /// above the other figures - it's the one stat worth reading at a glance
+    /// from across the room.
+    @ViewBuilder
+    private var heroEfficiencyCard: some View {
+        if let eff = avgEff {
+            HStack(spacing: 16) {
+                Image(systemName: vehicle.fuelType == .electric ? "bolt.car.fill" : "gauge.with.dots.needle.67percent")
+                    .font(.system(size: 26, weight: .bold))
+                    .foregroundStyle(Color.accentColor)
+                    .frame(width: 52, height: 52)
+                    .background(Color.accentColor.opacity(0.15), in: Circle())
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(String(format: "%.2f", eff))
+                        .font(.system(size: 40, weight: .bold, design: .rounded))
+                        .monospacedDigit()
+                    Text(vehicle.efficiencyUnit.rawValue)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding()
+            .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
+        }
+    }
+
+    /// The same figures as the phone's stats card, broken into individual
+    /// tiles with an icon apiece. A 2x3 grid of small cards reads as designed
+    /// for the space next to the chart; the phone's two dense text columns
+    /// would just leave the rest of that space blank.
+    private var statsTileGrid: some View {
+        LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
+            StatTile(icon: "dollarsign.circle.fill", tint: .green,
+                      value: totalCost.formatted(.currency(code: vehicle.currencyRaw)),
+                      label: vehicle.fuelType == .electric ? "Total Energy Cost" : "Total Fuel Cost")
+            StatTile(icon: vehicle.fuelType == .electric ? "bolt.fill" : "fuelpump.fill", tint: .blue,
+                      value: "\(Int(totalVolume)) \(vehicle.fuelUnit.rawValue.lowercased())",
+                      label: "Total Volume")
+            StatTile(icon: "tag.fill", tint: .orange,
+                      value: avgPrice.formatted(.currency(code: vehicle.currencyRaw)) + "/\(vehicle.fuelUnit.rawValue.prefix(3).lowercased())",
+                      label: "Avg Price")
+            StatTile(icon: "point.topleft.down.curvedto.point.bottomright.up", tint: .purple,
+                      value: "\(Int(totalDistance).formatted()) \(vehicle.odometerUnit.rawValue.lowercased())",
+                      label: "Total Distance")
+            StatTile(icon: "calendar", tint: .teal,
+                      value: String(format: "%.1f", distPerDay) + " \(vehicle.odometerUnit.rawValue.prefix(2).lowercased())/day",
+                      label: "Distance / Day")
+            StatTile(icon: "creditcard.fill", tint: .pink,
+                      value: costPerDay.formatted(.currency(code: vehicle.currencyRaw)) + "/day",
+                      label: "Cost / Day")
+        }
     }
 
     private var statsSummaryCard: some View {
@@ -411,5 +487,38 @@ struct VehicleChartsView: View {
                 chart.frame(width: max(800, CGFloat(filteredFills.count) * 40))
             }
         }
+    }
+}
+
+/// One figure in the iPad stats grid: an icon over a value over its label,
+/// each in its own rounded card so six numbers read as a small dashboard
+/// rather than a wall of text.
+private struct StatTile: View {
+    let icon: String
+    let tint: Color
+    let value: String
+    let label: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Image(systemName: icon)
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(tint)
+                .frame(width: 28, height: 28)
+                .background(tint.opacity(0.15), in: Circle())
+            Text(value)
+                .font(.title3.weight(.bold))
+                .monospacedDigit()
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+            Text(label)
+                .font(.caption.weight(.medium))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding()
+        .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
     }
 }
