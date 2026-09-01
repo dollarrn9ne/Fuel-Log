@@ -187,9 +187,10 @@ struct VehicleChartsView: View {
                                 .frame(minHeight: proxy.size.height - Self.topControlsAllowance, alignment: .top)
                             } else {
                                 let heights = chartHeights(for: proxy, wide: false)
-                                VStack(spacing: 20) {
+                                VStack(spacing: 16) {
                                     chartsCard(priceHeight: heights.price, efficiencyHeight: heights.efficiency)
-                                    statsSummaryCard
+                                    heroEfficiencyCard
+                                    statsTileGrid
                                     gradeComparisonCard
                                 }
                                 .padding(.horizontal)
@@ -230,15 +231,17 @@ struct VehicleChartsView: View {
 
     /// Sized off the window rather than fixed, so an iPad's charts read as
     /// deliberately drawn for the space rather than the phone's small strips
-    /// stretched wide with a slab of empty background beneath them. Capped so
-    /// an external display doesn't blow them up past the point of being
-    /// readable at a glance.
+    /// stretched wide with a slab of empty background beneath them. The chart
+    /// card is the one element on this screen with no natural ceiling on how
+    /// big it's useful to be - unlike the stats grid, which stops growing once
+    /// its six tiles fit - so it's the one asked to take up most of whatever
+    /// height is left, especially in portrait where that's most of the screen.
+    /// Capped so an external display doesn't blow it up past readable.
     private func chartHeights(for proxy: GeometryProxy, wide: Bool) -> (price: CGFloat, efficiency: CGFloat) {
         guard wide else { return (120, 160) }
         let available = proxy.size.height - Self.topControlsAllowance
-        let price = min(max(available * 0.24, 200), 320)
-        let efficiency = min(max(available * 0.34, 260), 460)
-        return (price, efficiency)
+        let combined = min(max(available * 0.85, 460), 1000)
+        return (combined * 0.35, combined * 0.65)
     }
 
     @ViewBuilder
@@ -330,9 +333,9 @@ struct VehicleChartsView: View {
         .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
     }
 
-    /// The iPad column's headline number, in its own card rather than stacked
+    /// The headline efficiency number, in its own card rather than stacked
     /// above the other figures - it's the one stat worth reading at a glance
-    /// from across the room.
+    /// from across the room. Shared by iPhone and iPad.
     @ViewBuilder
     private var heroEfficiencyCard: some View {
         if let eff = avgEff {
@@ -357,10 +360,11 @@ struct VehicleChartsView: View {
         }
     }
 
-    /// The same figures as the phone's stats card, broken into individual
-    /// tiles with an icon apiece. A 2x3 grid of small cards reads as designed
-    /// for the space next to the chart; the phone's two dense text columns
-    /// would just leave the rest of that space blank.
+    /// Each stat in its own tile with a coloured icon, shared by iPhone and
+    /// iPad. A 2x3 grid of small cards reads as designed; two dense columns of
+    /// plain text (the original phone card) didn't hold its own next to the
+    /// chart, and looked especially sparse across the extra width of the
+    /// iPad's own column beside it.
     private var statsTileGrid: some View {
         LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
             StatTile(icon: "dollarsign.circle.fill", tint: .green,
@@ -382,37 +386,6 @@ struct VehicleChartsView: View {
                       value: costPerDay.formatted(.currency(code: vehicle.currencyRaw)) + "/day",
                       label: "Cost / Day")
         }
-    }
-
-    private var statsSummaryCard: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            if let eff = avgEff {
-                HStack(alignment: .firstTextBaseline) {
-                    Text(String(format: "%.2f", eff))
-                        .font(.system(size: 40, weight: .bold, design: .rounded))
-                    Text(vehicle.efficiencyUnit.rawValue)
-                        .font(.title3.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(totalCost.formatted(.currency(code: vehicle.currencyRaw)))
-                    Text(avgPrice.formatted(.currency(code: vehicle.currencyRaw)) + "/\(vehicle.fuelUnit.rawValue.prefix(3).lowercased())")
-                    Text("\(Int(totalVolume)) \(vehicle.fuelUnit.rawValue.lowercased())")
-                }
-                Spacer()
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("\(Int(totalDistance)) \(vehicle.odometerUnit.rawValue.lowercased())")
-                    Text(String(format: "%.1f", distPerDay) + " \(vehicle.odometerUnit.rawValue.prefix(2).lowercased())/day")
-                    Text(costPerDay.formatted(.currency(code: vehicle.currencyRaw)) + "/day")
-                }
-            }
-            .font(.subheadline.weight(.medium))
-        }
-        .padding()
-        .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
     }
 
     /// Compares efficiency across the fuel grades this vehicle has actually used
