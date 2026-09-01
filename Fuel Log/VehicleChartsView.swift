@@ -295,7 +295,12 @@ struct VehicleChartsView: View {
                 }
             )
 
-            Divider().background(Color.white.opacity(0.1))
+            // Vertical breathing room, not just the hairline itself: Swift
+            // Charts can let a y-axis tick label (e.g. the price chart's
+            // "$0.00") spill slightly past its chart's own frame, which with
+            // no gap here collided with the efficiency chart's "MPG (US)"
+            // caption directly beneath it.
+            Divider().background(Color.white.opacity(0.1)).padding(.vertical, 8)
 
             // Efficiency Chart
             syncableChart(
