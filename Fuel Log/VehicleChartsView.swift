@@ -169,32 +169,19 @@ struct VehicleChartsView: View {
                         }
 
                         if filteredFills.count > 1 {
-                            // Side by side once there's room for both the chart and a
-                            // column of stats beside it, rather than the phone's single
-                            // stack widened out with the numbers lost underneath.
-                            if isWideLayout(proxy) {
-                                let heights = chartHeights(for: proxy, wide: true)
-                                HStack(alignment: .top, spacing: 20) {
-                                    chartsCard(priceHeight: heights.price, efficiencyHeight: heights.efficiency)
-                                    VStack(spacing: 16) {
-                                        heroEfficiencyCard
-                                        statsTileGrid
-                                        gradeComparisonCard
-                                    }
-                                    .frame(width: 380)
-                                }
-                                .padding(.horizontal)
-                                .frame(minHeight: proxy.size.height - Self.topControlsAllowance, alignment: .top)
-                            } else {
-                                let heights = chartHeights(for: proxy, wide: false)
-                                VStack(spacing: 16) {
-                                    chartsCard(priceHeight: heights.price, efficiencyHeight: heights.efficiency)
-                                    heroEfficiencyCard
-                                    statsTileGrid
-                                    gradeComparisonCard
-                                }
-                                .padding(.horizontal)
+                            // The chart on top and the details below it, on iPhone and
+                            // iPad alike - a side-by-side split read as the chart and
+                            // the stats competing for the same cramped column instead
+                            // of each getting the width it needed.
+                            let isWide = isWideLayout(proxy)
+                            let heights = chartHeights(wide: isWide)
+                            VStack(spacing: 16) {
+                                chartsCard(priceHeight: heights.price, efficiencyHeight: heights.efficiency)
+                                heroEfficiencyCard
+                                statsTileGrid(columns: isWide ? 3 : 2)
+                                gradeComparisonCard
                             }
+                            .padding(.horizontal)
                         } else {
                             ContentUnavailableView("Not Enough Data", systemImage: "chart.xyaxis.line", description: Text("Log at least two fill-ups in this timeframe to see your charts."))
                         }
@@ -217,31 +204,17 @@ struct VehicleChartsView: View {
         }
     }
 
-    /// Wide enough on an iPad to give the stats column its own space beside the
-    /// chart rather than squeezing it underneath. Excluded on iPhone even in
-    /// landscape, where the chart needs the width more than the stats do.
+    /// Wide enough on an iPad to earn taller charts and a third grid column.
+    /// Excluded on iPhone even in landscape, where those would stretch the
+    /// same handful of tiles thinner rather than looking more considered.
     private func isWideLayout(_ proxy: GeometryProxy) -> Bool {
         UIDevice.current.userInterfaceIdiom == .pad && proxy.size.width > 700
     }
 
-    /// Rough height of the timeframe picker plus its vertical padding, so the
-    /// wide layout's minimum height reflects the space actually left over
-    /// rather than the whole screen.
-    private static let topControlsAllowance: CGFloat = 100
-
-    /// Sized off the window rather than fixed, so an iPad's charts read as
-    /// deliberately drawn for the space rather than the phone's small strips
-    /// stretched wide with a slab of empty background beneath them. The chart
-    /// card is the one element on this screen with no natural ceiling on how
-    /// big it's useful to be - unlike the stats grid, which stops growing once
-    /// its six tiles fit - so it's the one asked to take up most of whatever
-    /// height is left, especially in portrait where that's most of the screen.
-    /// Capped so an external display doesn't blow it up past readable.
-    private func chartHeights(for proxy: GeometryProxy, wide: Bool) -> (price: CGFloat, efficiency: CGFloat) {
-        guard wide else { return (120, 160) }
-        let available = proxy.size.height - Self.topControlsAllowance
-        let combined = min(max(available * 0.85, 460), 1000)
-        return (combined * 0.35, combined * 0.65)
+    /// Taller on iPad, where the extra width would otherwise stretch the
+    /// phone's chart into a thin ribbon across the screen.
+    private func chartHeights(wide: Bool) -> (price: CGFloat, efficiency: CGFloat) {
+        wide ? (200, 280) : (120, 160)
     }
 
     @ViewBuilder
@@ -361,12 +334,12 @@ struct VehicleChartsView: View {
     }
 
     /// Each stat in its own tile with a coloured icon, shared by iPhone and
-    /// iPad. A 2x3 grid of small cards reads as designed; two dense columns of
-    /// plain text (the original phone card) didn't hold its own next to the
-    /// chart, and looked especially sparse across the extra width of the
-    /// iPad's own column beside it.
-    private var statsTileGrid: some View {
-        LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
+    /// iPad; two dense columns of plain text (the original phone card) didn't
+    /// hold its own under a full-width chart. Three columns once there's the
+    /// width to spare, so the tiles stay roughly card-shaped instead of
+    /// stretching into wide, mostly-empty bars.
+    private func statsTileGrid(columns: Int) -> some View {
+        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: columns), spacing: 12) {
             StatTile(icon: "dollarsign.circle.fill", tint: .green,
                       value: totalCost.formatted(.currency(code: vehicle.currencyRaw)),
                       label: vehicle.fuelType == .electric ? "Total Energy Cost" : "Total Fuel Cost")
