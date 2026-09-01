@@ -338,28 +338,22 @@ struct MainDashboardView: View {
         .sheet(isPresented: $showingAddVehicle) { NavigationStack { AddVehicleView() }.roomySheetOnPad() }
         .sheet(item: $vehicleToEdit) { v in NavigationStack { AddVehicleView(editingVehicle: v) }.roomySheetOnPad() }
         .sheet(isPresented: $showingArchivedVehicles) { ArchivedVehiclesView().roomySheetOnPad() }
-        .sheet(isPresented: $showingCharts) { VehicleChartsView(vehicle: vehicle).roomySheetOnPad() }
         .alert("Delete \(vehicle.name)?", isPresented: $showingDeleteConfirmation) { Button("Cancel", role: .cancel) {}; Button("Delete", role: .destructive) { deleteVehicle() } } message: { Text("This will permanently delete this vehicle and all logs.") }
-        // A sheet that adapts to a full-screen cover when compact, rather than a
-        // cover everywhere. Taking over the whole iPad for a secondary task hides
-        // the map and the vehicle you were looking at; on a phone the cover is
-        // still right. Declared as one presentation so the view keeps its
-        // identity across a rotation rather than being torn down and rebuilt.
-        //
-        // No NavigationStack here: TripsListView supplies its own container, a
-        // split view on iPad and a stack on iPhone.
-        .sheet(isPresented: $showingTrips) {
-            TripsListView(vehicle: vehicle)
-                .presentationCompactAdaptation(.fullScreenCover)
-                .roomySheetOnPad()
-        }
         .sheet(isPresented: $showingMonthlyReport) { NavigationStack { MonthlyReportView(month: monthlyReportMonth, isModal: true) }.roomySheetOnPad() }
-        // Always a full-screen cover, on iPhone and iPad alike: SettingsView
-        // supplies its own full-width container (a split view on iPad, a stack
-        // on iPhone), and a `.page`-sized sheet only boxed that in and left the
-        // split view's detail text cramped and clipped on iPad.
+        // Always a full-screen cover, on iPhone and iPad alike, for the three
+        // presentations that build their own width-aware layout (a split view or
+        // a wide two-column arrangement on iPad). A `.page`-sized sheet boxed
+        // those in: in portrait it stayed narrow enough to never earn its wide
+        // layout, and in landscape it floated as an undersized card rather than
+        // filling the screen.
         .fullScreenCover(isPresented: $showingSettings) {
             SettingsView()
+        }
+        .fullScreenCover(isPresented: $showingTrips) {
+            TripsListView(vehicle: vehicle)
+        }
+        .fullScreenCover(isPresented: $showingCharts) {
+            VehicleChartsView(vehicle: vehicle)
         }
         }
     }
