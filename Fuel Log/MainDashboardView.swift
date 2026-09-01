@@ -257,7 +257,14 @@ struct MainDashboardView: View {
                             }
                         } label: { Image(systemName: "location.fill").font(.title3).foregroundColor(.primary).padding(12).background(.regularMaterial).clipShape(Circle()).shadow(radius: 2) }
                             .hoverEffect(.highlight)
-                    }.padding().opacity(isMapReady ? 1 : 0)
+                    }
+                    .padding()
+                    // Clears the side panel the same way the map's own trailing
+                    // inset does (see FlightPathMap's trailingPadding above):
+                    // without it these anchor to the screen's trailing edge,
+                    // which the panel then draws over in landscape.
+                    .padding(.trailing, layout(proxy) == .sidePanel ? Self.panelWidth : 0)
+                    .opacity(isMapReady ? 1 : 0)
                 }
                 Spacer()
             }
