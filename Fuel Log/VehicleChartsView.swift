@@ -169,19 +169,31 @@ struct VehicleChartsView: View {
                         }
 
                         if filteredFills.count > 1 {
-                            // The chart on top and the details below it, on iPhone and
-                            // iPad alike - a side-by-side split read as the chart and
-                            // the stats competing for the same cramped column instead
-                            // of each getting the width it needed.
-                            let isWide = isWideLayout(proxy)
-                            let heights = chartHeights(wide: isWide)
-                            VStack(spacing: 16) {
-                                chartsCard(priceHeight: heights.price, efficiencyHeight: heights.efficiency)
-                                heroEfficiencyCard
-                                statsTileGrid(columns: isWide ? 3 : 2)
-                                gradeComparisonCard
+                            // iPad's own branch, kept separate from iPhone's below so a
+                            // change made for one screen size can't reach the other: it
+                            // used to put the chart and the stats side by side, which
+                            // read as the two competing for the same cramped column
+                            // instead of each getting the width it needed. Now it's the
+                            // same chart-then-details order as iPhone, just with a
+                            // taller chart and a third grid column since there's width
+                            // to spare.
+                            if isWideLayout(proxy) {
+                                VStack(spacing: 16) {
+                                    chartsCard(priceHeight: 200, efficiencyHeight: 280)
+                                    heroEfficiencyCard
+                                    statsTileGrid(columns: 3)
+                                    gradeComparisonCard
+                                }
+                                .padding(.horizontal)
+                            } else {
+                                VStack(spacing: 16) {
+                                    chartsCard(priceHeight: 120, efficiencyHeight: 160)
+                                    heroEfficiencyCard
+                                    statsTileGrid(columns: 2)
+                                    gradeComparisonCard
+                                }
+                                .padding(.horizontal)
                             }
-                            .padding(.horizontal)
                         } else {
                             ContentUnavailableView("Not Enough Data", systemImage: "chart.xyaxis.line", description: Text("Log at least two fill-ups in this timeframe to see your charts."))
                         }
@@ -209,12 +221,6 @@ struct VehicleChartsView: View {
     /// same handful of tiles thinner rather than looking more considered.
     private func isWideLayout(_ proxy: GeometryProxy) -> Bool {
         UIDevice.current.userInterfaceIdiom == .pad && proxy.size.width > 700
-    }
-
-    /// Taller on iPad, where the extra width would otherwise stretch the
-    /// phone's chart into a thin ribbon across the screen.
-    private func chartHeights(wide: Bool) -> (price: CGFloat, efficiency: CGFloat) {
-        wide ? (200, 280) : (120, 160)
     }
 
     @ViewBuilder
