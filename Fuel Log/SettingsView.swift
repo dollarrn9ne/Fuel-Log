@@ -219,24 +219,30 @@ struct SettingsView: View {
     private var padLayout: some View {
         NavigationSplitView {
             List(SettingsSection.allCases, selection: $selectedSection) { section in
-                Label {
-                    Text(section.title)
-                } icon: {
-                    // Red for the destructive one, so the sidebar warns before
-                    // the pane does.
-                    Image(systemName: section.icon)
-                        .foregroundStyle(section == .danger ? Color.red : Color.accentColor)
-                }
-                .tag(section)
+                Label(section.title, systemImage: section.icon)
+                    // listItemTint rather than foregroundStyle on the image: the
+                    // latter is absolute, so a selected row painted the icon in
+                    // the same blue as its own highlight and it disappeared. This
+                    // hands the colour to the list, which inverts it on selection.
+                    .listItemTint(section == .danger ? .red : .accentColor)
+                    .tag(section)
             }
             .navigationTitle("Settings")
             .toolbar { closeButton }
         } detail: {
             // Its own stack, so the Sharing and About rows can still push.
             NavigationStack {
-                Form { sectionContent(for: selectedSection ?? .appearance) }
-                    .navigationTitle((selectedSection ?? .appearance).title)
-                    .navigationBarTitleDisplayMode(.inline)
+                let section = selectedSection ?? .appearance
+                // About is a whole screen rather than a group of controls, so the
+                // pane shows it directly. Going through a row that pushes to it
+                // would make the sidebar selection a menu leading to a menu.
+                if section == .about {
+                    AboutView()
+                } else {
+                    Form { sectionContent(for: section) }
+                        .navigationTitle(section.title)
+                        .navigationBarTitleDisplayMode(.inline)
+                }
             }
         }
     }
