@@ -31,6 +31,13 @@ struct SettingsView: View {
     @State private var pendingImportSource: ImportSource = .none
     @State private var csvDocument: CSVDocument?
     @State private var exportFilename = "VehicleData"
+    /// Set when a CSV arrived by drag and drop rather than the file importer, so
+    /// the source-app dialog importing it doesn't need to reopen the picker.
+    @State private var pendingDroppedCSVText: String?
+    /// Highlights the import row while a drag is over it. iPad's multitasking
+    /// makes dragging a CSV in from Files a real path, not just a phone-style
+    /// tap-then-browse flow.
+    @State private var isTargetingCSVDrop = false
 
     @State private var backupDocument: JSONDocument?
     @State private var showingBackupExporter = false
@@ -119,16 +126,7 @@ struct SettingsView: View {
         .fileImporter(isPresented: $showFileImporter, allowedContentTypes: [.commaSeparatedText]) { result in
             if case .success(let url) = result, url.startAccessingSecurityScopedResource() {
                 if let data = try? String(contentsOf: url, encoding: selectedEncoding.stringEncoding) {
-                    isImporting = true
-                    importProgress = 0.0
-                    Task {
-                        await performImport(data: data, source: pendingImportSource)
-                        isImporting = false
-                        withAnimation { showImportSuccess = true }
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
-                            withAnimation { showImportSuccess = false }
-                        }
-                    }
+                    Task { await runCSVImport(data: data, source: pendingImportSource) }
                 }
                 url.stopAccessingSecurityScopedResource()
             }
@@ -422,9 +420,24 @@ struct SettingsView: View {
                 
                 Button { showingImportSourcePicker = true } label: { Label("Import Vehicle Data (CSV)", systemImage: "square.and.arrow.down") }
                 .confirmationDialog("Select Source App", isPresented: $showingImportSourcePicker, titleVisibility: .visible) {
-                    ForEach(ImportSource.allCases) { source in Button(source.rawValue) { pendingImportSource = source; showFileImporter = true } }
-                    Button("Cancel", role: .cancel) {}
+                    ForEach(ImportSource.allCases) { source in
+                        Button(source.rawValue) {
+                            pendingImportSource = source
+                            if let text = pendingDroppedCSVText {
+                                pendingDroppedCSVText = nil
+                                Task { await runCSVImport(data: text, source: source) }
+                            } else {
+                                showFileImporter = true
+                            }
+                        }
+                    }
+                    Button("Cancel", role: .cancel) { pendingDroppedCSVText = nil }
                 } message: { Text("Select the app that generated your CSV so it can be formatted correctly.") }
+                // Drop a CSV in from Files or another app's window, rather than
+                // only reaching it through the button's own file browser -
+                // iPad's multitasking makes that drag a real path to expect.
+                .onDrop(of: [.commaSeparatedText, .plainText], isTargeted: $isTargetingCSVDrop) { handleCSVDrop($0) }
+                .listRowBackground(isTargetingCSVDrop ? Color.accentColor.opacity(0.15) : nil)
         }
     }
 
@@ -511,7 +524,40 @@ struct SettingsView: View {
         let importer = CSVImporter()
         await importer.performImport(data: data, source: source, modelContext: modelContext)
     }
-    
+
+    /// Runs the import and its progress/success UI, shared by the file importer
+    /// and a dropped CSV alike - the two differ only in how the text arrived.
+    @MainActor private func runCSVImport(data: String, source: ImportSource) async {
+        isImporting = true
+        importProgress = 0.0
+        await performImport(data: data, source: source)
+        isImporting = false
+        withAnimation { showImportSuccess = true }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+            withAnimation { showImportSuccess = false }
+        }
+    }
+
+    /// Reads a CSV dropped in from Files (or another app) and hands its text to
+    /// the same source-app picker the "Import Vehicle Data" button uses, since
+    /// we still need to know which app's column layout to expect.
+    private func handleCSVDrop(_ providers: [NSItemProvider]) -> Bool {
+        guard let provider = providers.first else { return false }
+        let typeIdentifier = provider.hasItemConformingToTypeIdentifier(UTType.commaSeparatedText.identifier)
+            ? UTType.commaSeparatedText.identifier
+            : UTType.plainText.identifier
+        guard provider.hasItemConformingToTypeIdentifier(typeIdentifier) else { return false }
+        _ = provider.loadFileRepresentation(forTypeIdentifier: typeIdentifier) { url, _ in
+            guard let url, let text = try? String(contentsOf: url, encoding: selectedEncoding.stringEncoding) else { return }
+            DispatchQueue.main.async {
+                pendingDroppedCSVText = text
+                showingImportSourcePicker = true
+            }
+        }
+        return true
+    }
+
+
     private var defaultBackupFilename: String {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd"

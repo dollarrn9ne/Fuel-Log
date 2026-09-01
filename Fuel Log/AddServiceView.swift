@@ -3,6 +3,7 @@ import SwiftData
 import CoreLocation
 import MapKit
 import PhotosUI
+import UniformTypeIdentifiers
 import FuelLogShared
 
 struct AddServiceView: View {
@@ -32,6 +33,11 @@ struct AddServiceView: View {
     @State private var isScanningReceipt = false
     @State private var isParsingReceipt = false
     @State private var showingScannerUnavailableAlert = false
+    @State private var receiptPickerItem: PhotosPickerItem?
+    /// Highlights the receipt row while a drag is over it. iPad's multitasking
+    /// makes dragging a receipt photo in from Photos a real path, not just the
+    /// scan button or the picker.
+    @State private var isTargetingReceiptDrop = false
 
     var locationSuggestions: [LocationSuggestion] {
         let lowerQuery = locationName.localizedLowercase
@@ -68,7 +74,7 @@ struct AddServiceView: View {
                             .frame(maxHeight: 200)
                             .cornerRadius(8)
                             .frame(maxWidth: .infinity)
-                        
+
                         Button(action: { self.scannedImage = nil }) {
                             Image(systemName: "xmark.circle.fill")
                                 .font(.title)
@@ -77,28 +83,45 @@ struct AddServiceView: View {
                                 .padding(8)
                         }
                     }
+                    .onDrop(of: [.image], isTargeted: $isTargetingReceiptDrop) { handleReceiptDrop($0) }
                 } else {
-                    Button(action: {
-                        #if targetEnvironment(simulator)
-                        showingScannerUnavailableAlert = true
-                        #else
-                        isScanningReceipt = true
-                        #endif
-                    }) {
-                        HStack {
-                            Image(systemName: "doc.viewfinder")
-                                .font(.title2)
-                            Text("Scan Receipt for Auto-Fill")
-                                .fontWeight(.semibold)
-                            Spacer()
-                            if isParsingReceipt {
-                                ProgressView()
+                    VStack(spacing: 12) {
+                        Button(action: {
+                            #if targetEnvironment(simulator)
+                            showingScannerUnavailableAlert = true
+                            #else
+                            isScanningReceipt = true
+                            #endif
+                        }) {
+                            HStack {
+                                Image(systemName: "doc.viewfinder")
+                                    .font(.title2)
+                                Text("Scan Receipt for Auto-Fill")
+                                    .fontWeight(.semibold)
+                                Spacer()
+                                if isParsingReceipt {
+                                    ProgressView()
+                                }
+                            }
+                        }
+                        Divider()
+                        PhotosPicker(selection: $receiptPickerItem, matching: .images, photoLibrary: .shared()) {
+                            HStack {
+                                Image(systemName: "photo.on.rectangle")
+                                    .font(.title2)
+                                Text("Choose Receipt Photo")
+                                    .fontWeight(.semibold)
+                                Spacer()
                             }
                         }
                     }
+                    // A drop target for dragging a receipt in from Photos or Files,
+                    // on top of the scan and picker buttons - iPad's multitasking
+                    // makes that a real path to expect, not just a phone affordance.
+                    .onDrop(of: [.image], isTargeted: $isTargetingReceiptDrop) { handleReceiptDrop($0) }
                 }
             }
-            .listRowBackground(Color(uiColor: .secondarySystemGroupedBackground))
+            .listRowBackground(isTargetingReceiptDrop ? Color.accentColor.opacity(0.15) : Color(uiColor: .secondarySystemGroupedBackground))
             
             Section("Service Details") {
                 DatePicker("Date", selection: $date)
@@ -159,7 +182,15 @@ struct AddServiceView: View {
                 }
             }
         }
-        .onAppear { 
+        .onChange(of: receiptPickerItem) { _, newItem in
+            Task {
+                if let data = try? await newItem?.loadTransferable(type: Data.self), let image = UIImage(data: data) {
+                    await MainActor.run { scannedImage = image }
+                }
+                receiptPickerItem = nil
+            }
+        }
+        .onAppear {
             if let s = editingService { 
                 date = s.date; locationName = s.location?.name ?? ""; latitude = s.location?.latitude ?? 0; longitude = s.location?.longitude ?? 0; odometerStr = s.odometer.odometerString; type = s.type; costStr = "\(s.cost)"; notes = s.notes
                 if let rData = s.receiptData { scannedImage = UIImage(data: rData) }
@@ -174,6 +205,18 @@ struct AddServiceView: View {
         }
     }
     
+    /// Accepts an image dragged in from Photos, Files, or another app's window.
+    /// Loading is async since NSItemProvider always is, but the drop itself is
+    /// accepted synchronously so the drag doesn't visually bounce back.
+    private func handleReceiptDrop(_ providers: [NSItemProvider]) -> Bool {
+        guard let provider = providers.first, provider.canLoadObject(ofClass: UIImage.self) else { return false }
+        _ = provider.loadObject(ofClass: UIImage.self) { image, _ in
+            guard let uiImage = image as? UIImage else { return }
+            DispatchQueue.main.async { scannedImage = uiImage }
+        }
+        return true
+    }
+
     private func saveService() {
         let odo = Double(odometerStr.replacingOccurrences(of: ",", with: ".")) ?? 0, cost = Double(costStr.replacingOccurrences(of: ",", with: ".")) ?? 0, finalLocationName = locationName.trimmingCharacters(in: .whitespacesAndNewlines)
         let finalReceiptData = scannedImage?.jpegData(compressionQuality: 0.7)
