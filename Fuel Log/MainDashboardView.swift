@@ -248,6 +248,7 @@ struct MainDashboardView: View {
                     VStack(spacing: 12) {
                         if colorScheme != .dark {
                             Button { useSatellite.toggle() } label: { Image(systemName: useSatellite ? "map.fill" : "globe.americas.fill").font(.title3).foregroundColor(.primary).padding(12).background(.regularMaterial).clipShape(Circle()).shadow(radius: 2) }
+                                .hoverEffect(.highlight)
                         }
                         Button {
                             if let loc = locationManager.location { withAnimation(.easeInOut(duration: 0.5)) { mapPosition = .region(MKCoordinateRegion(center: loc.coordinate, latitudinalMeters: 1000, longitudinalMeters: 1000)) } } else {
@@ -255,6 +256,7 @@ struct MainDashboardView: View {
                                 locationManager.requestLocation()
                             }
                         } label: { Image(systemName: "location.fill").font(.title3).foregroundColor(.primary).padding(12).background(.regularMaterial).clipShape(Circle()).shadow(radius: 2) }
+                            .hoverEffect(.highlight)
                     }.padding().opacity(isMapReady ? 1 : 0)
                 }
                 Spacer()
@@ -343,8 +345,11 @@ struct MainDashboardView: View {
         // the map and the vehicle you were looking at; on a phone the cover is
         // still right. Declared as one presentation so the view keeps its
         // identity across a rotation rather than being torn down and rebuilt.
+        //
+        // No NavigationStack here: TripsListView supplies its own container, a
+        // split view on iPad and a stack on iPhone.
         .sheet(isPresented: $showingTrips) {
-            NavigationStack { TripsListView(vehicle: vehicle) }
+            TripsListView(vehicle: vehicle)
                 .presentationCompactAdaptation(.fullScreenCover)
                 .roomySheetOnPad()
         }
@@ -680,6 +685,7 @@ struct DashboardSheetContent: View {
                             }
                             .padding()
                             .applyLiquidGlassOrBackground(cornerRadius: 16)
+                            .hoverEffect(.highlight)
                         }
                         .padding(.horizontal, 24)
                         .padding(.bottom, 24)
@@ -769,6 +775,7 @@ struct DashboardSheetContent: View {
             
             HStack(spacing: 12) {
                 Button { showingAddVehicle = true } label: { Image(systemName: "plus").font(.system(size: 20, weight: .semibold)).foregroundColor(.primary).frame(width: 44, height: 44).background(Color(uiColor: .tertiarySystemFill), in: Circle()) }
+                    .hoverEffect(.highlight)
                 Button {
                     if let month = newReportMonth {
                         onAcknowledgeReport()
@@ -789,10 +796,13 @@ struct DashboardSheetContent: View {
                         }
                         .symbolEffect(.pulse, options: .repeating, isActive: newReportMonth != nil)
                 }.accessibilityIdentifier("TripsButton")
+                    .hoverEffect(.highlight)
                 Button { shareVehicleForLogging() } label: { Image(systemName: "square.and.arrow.up").font(.system(size: 20)).foregroundColor(.primary).frame(width: 44, height: 44).background(Color(uiColor: .tertiarySystemFill), in: Circle()) }
                     .accessibilityIdentifier("ShareVehicleButton")
                     .accessibilityLabel("Share \(vehicle.name) for logging")
+                    .hoverEffect(.highlight)
                 Button { showingSettings = true } label: { Image(systemName: "gearshape.fill").font(.system(size: 20)).foregroundColor(.primary).frame(width: 44, height: 44).background(Color(uiColor: .tertiarySystemFill), in: Circle()) }
+                    .hoverEffect(.highlight)
             }
         }.padding(.horizontal, 24).padding(.top, 24).padding(.bottom, 16)
     }
@@ -827,13 +837,14 @@ struct DashboardSheetContent: View {
     private var quickActionButtons: some View {
         HStack(spacing: 12) {
             fuelQuickAction
-            Button { showingAddService = true } label: { 
+            Button { showingAddService = true } label: {
                 Label("Service", systemImage: "wrench.and.screwdriver.fill")
                     .font(.headline.weight(.bold))
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 14)
                     .background(Color.orange, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
-                    .foregroundColor(.white) 
+                    .foregroundColor(.white)
+                    .hoverEffect(.highlight)
             }.accessibilityIdentifier("QuickAddService")
         }.padding(.horizontal, 24).padding(.bottom, 16)
     }
@@ -874,6 +885,7 @@ struct DashboardSheetContent: View {
             .padding(.vertical, 14)
             .background(vehicle.fuelType == .electric ? Color.red : (vehicle.fuelType == .diesel ? Color.green : Color.blue), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
             .foregroundColor(.white)
+            .hoverEffect(.highlight)
     }
     
     private var filteredEvents: [VehicleEvent] {

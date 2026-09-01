@@ -146,153 +146,56 @@ struct VehicleChartsView: View {
     
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(spacing: 20) {
-                    Picker("Timeframe", selection: $timeframe) {
-                        ForEach(ChartTimeframe.allCases) { tf in
-                            Text(tf.rawValue).tag(tf)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .padding(.horizontal)
-                    
-                    if timeframe == .custom {
-                        VStack(alignment: .leading, spacing: 12) {
-                            DatePicker("From", selection: $customStart, displayedComponents: .date)
-                            DatePicker("To", selection: $customEnd, in: customStart...Date(), displayedComponents: .date)
-                        }
-                        .padding(.horizontal)
-                        .onChange(of: customStart) { _, newStart in
-                            if customEnd < newStart { customEnd = newStart }
-                        }
-                    }
-                    
-                    if filteredFills.count > 1 {
-                        VStack(spacing: 0) {
-                            // Price Chart
-                            syncableChart(
-                                Chart(filteredFills) { fillUp in
-                                    LineMark(
-                                        x: .value("Date", fillUp.date),
-                                        y: .value("Price", fillUp.pricePerUnit)
-                                    )
-                                    .foregroundStyle(Color.yellow)
-                                    .interpolationMethod(.monotone)
-                                    
-                                    PointMark(
-                                        x: .value("Date", fillUp.date),
-                                        y: .value("Price", fillUp.pricePerUnit)
-                                    )
-                                    .foregroundStyle(Color.yellow)
-                                }
-                                .chartYAxis {
-                                    AxisMarks(position: .trailing) { value in
-                                        AxisGridLine()
-                                        AxisTick()
-                                        if let val = value.as(Double.self) {
-                                            AxisValueLabel(val.formatted(.currency(code: vehicle.currencyRaw)))
-                                        }
-                                    }
-                                }
-                                .chartXAxis {
-                                    AxisMarks(values: .stride(by: .month, count: 1)) { _ in
-                                        AxisGridLine()
-                                    }
-                                }
-                                .frame(height: 120)
-                                .overlay(alignment: .topLeading) {
-                                    Text("\(vehicle.currencyRaw)/\(vehicle.fuelUnit.rawValue.prefix(3).lowercased())")
-                                        .font(.caption.weight(.bold))
-                                        .foregroundStyle(Color.yellow)
-                                        .padding([.top, .leading], 8)
-                                }
-                            )
-                            
-                            Divider().background(Color.white.opacity(0.1))
-                            
-                            // Efficiency Chart
-                            syncableChart(
-                                Chart(efficiencyData, id: \.date) { item in
-                                    LineMark(
-                                        x: .value("Date", item.date),
-                                        y: .value("Efficiency", item.value)
-                                    )
-                                    .foregroundStyle(Color.pink)
-                                    .interpolationMethod(.stepCenter)
-                                    
-                                    AreaMark(
-                                        x: .value("Date", item.date),
-                                        y: .value("Efficiency", item.value)
-                                    )
-                                    .foregroundStyle(LinearGradient(colors: [Color.pink.opacity(0.5), .clear], startPoint: .top, endPoint: .bottom))
-                                    .interpolationMethod(.stepCenter)
-                                }
-                                .chartYAxis {
-                                    AxisMarks(position: .trailing) { _ in
-                                        AxisGridLine()
-                                        AxisTick()
-                                        AxisValueLabel()
-                                    }
-                                }
-                                .chartXAxis {
-                                    AxisMarks(values: .stride(by: .month, count: 1)) { _ in
-                                        AxisGridLine()
-                                        AxisTick()
-                                        AxisValueLabel(format: .dateTime.month(.abbreviated).year(.twoDigits))
-                                    }
-                                }
-                                .frame(height: 160)
-                                .overlay(alignment: .topLeading) {
-                                    Text(vehicle.efficiencyUnit.rawValue)
-                                        .font(.caption.weight(.bold))
-                                        .foregroundStyle(Color.pink)
-                                        .padding([.top, .leading], 8)
-                                }
-                            )
-                        }
-                        .padding(.top, 8)
-                        .padding(.bottom, 16)
-                        .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
-                        .padding(.horizontal)
-                        
-                        // Stats Summary Card
-                        VStack(alignment: .leading, spacing: 16) {
-                            if let eff = avgEff {
-                                HStack(alignment: .firstTextBaseline) {
-                                    Text(String(format: "%.2f", eff))
-                                        .font(.system(size: 40, weight: .bold, design: .rounded))
-                                    Text(vehicle.efficiencyUnit.rawValue)
-                                        .font(.title3.weight(.semibold))
-                                        .foregroundStyle(.secondary)
-                                }
+            GeometryReader { proxy in
+                ScrollView {
+                    VStack(spacing: 20) {
+                        Picker("Timeframe", selection: $timeframe) {
+                            ForEach(ChartTimeframe.allCases) { tf in
+                                Text(tf.rawValue).tag(tf)
                             }
-                            
-                            HStack(alignment: .top) {
-                                VStack(alignment: .leading, spacing: 8) {
-                                    Text(totalCost.formatted(.currency(code: vehicle.currencyRaw)))
-                                    Text(avgPrice.formatted(.currency(code: vehicle.currencyRaw)) + "/\(vehicle.fuelUnit.rawValue.prefix(3).lowercased())")
-                                    Text("\(Int(totalVolume)) \(vehicle.fuelUnit.rawValue.lowercased())")
-                                }
-                                Spacer()
-                                VStack(alignment: .leading, spacing: 8) {
-                                    Text("\(Int(totalDistance)) \(vehicle.odometerUnit.rawValue.lowercased())")
-                                    Text(String(format: "%.1f", distPerDay) + " \(vehicle.odometerUnit.rawValue.prefix(2).lowercased())/day")
-                                    Text(costPerDay.formatted(.currency(code: vehicle.currencyRaw)) + "/day")
-                                }
-                            }
-                            .font(.subheadline.weight(.medium))
                         }
-                        .padding()
-                        .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
+                        .pickerStyle(.segmented)
                         .padding(.horizontal)
 
-                        gradeComparisonCard
+                        if timeframe == .custom {
+                            VStack(alignment: .leading, spacing: 12) {
+                                DatePicker("From", selection: $customStart, displayedComponents: .date)
+                                DatePicker("To", selection: $customEnd, in: customStart...Date(), displayedComponents: .date)
+                            }
+                            .padding(.horizontal)
+                            .onChange(of: customStart) { _, newStart in
+                                if customEnd < newStart { customEnd = newStart }
+                            }
+                        }
 
-                    } else {
-                        ContentUnavailableView("Not Enough Data", systemImage: "chart.xyaxis.line", description: Text("Log at least two fill-ups in this timeframe to see your charts."))
+                        if filteredFills.count > 1 {
+                            // Side by side once there's room for both the chart and a
+                            // column of stats beside it, rather than the phone's single
+                            // stack widened out with the numbers lost underneath.
+                            if isWideLayout(proxy) {
+                                HStack(alignment: .top, spacing: 20) {
+                                    chartsCard
+                                    VStack(spacing: 20) {
+                                        statsSummaryCard
+                                        gradeComparisonCard
+                                    }
+                                    .frame(width: 340)
+                                }
+                                .padding(.horizontal)
+                            } else {
+                                VStack(spacing: 20) {
+                                    chartsCard
+                                    statsSummaryCard
+                                    gradeComparisonCard
+                                }
+                                .padding(.horizontal)
+                            }
+                        } else {
+                            ContentUnavailableView("Not Enough Data", systemImage: "chart.xyaxis.line", description: Text("Log at least two fill-ups in this timeframe to see your charts."))
+                        }
                     }
+                    .padding(.vertical)
                 }
-                .padding(.vertical)
             }
             .background(Color(uiColor: .systemGroupedBackground).ignoresSafeArea())
             .navigationTitle("Trends & Charts")
@@ -308,7 +211,134 @@ struct VehicleChartsView: View {
             .onChange(of: customEnd) { _, _ in resetScrollPosition() }
         }
     }
-    
+
+    /// Wide enough on an iPad to give the stats column its own space beside the
+    /// chart rather than squeezing it underneath. Excluded on iPhone even in
+    /// landscape, where the chart needs the width more than the stats do.
+    private func isWideLayout(_ proxy: GeometryProxy) -> Bool {
+        UIDevice.current.userInterfaceIdiom == .pad && proxy.size.width > 700
+    }
+
+    @ViewBuilder
+    private var chartsCard: some View {
+        VStack(spacing: 0) {
+            // Price Chart
+            syncableChart(
+                Chart(filteredFills) { fillUp in
+                    LineMark(
+                        x: .value("Date", fillUp.date),
+                        y: .value("Price", fillUp.pricePerUnit)
+                    )
+                    .foregroundStyle(Color.yellow)
+                    .interpolationMethod(.monotone)
+
+                    PointMark(
+                        x: .value("Date", fillUp.date),
+                        y: .value("Price", fillUp.pricePerUnit)
+                    )
+                    .foregroundStyle(Color.yellow)
+                }
+                .chartYAxis {
+                    AxisMarks(position: .trailing) { value in
+                        AxisGridLine()
+                        AxisTick()
+                        if let val = value.as(Double.self) {
+                            AxisValueLabel(val.formatted(.currency(code: vehicle.currencyRaw)))
+                        }
+                    }
+                }
+                .chartXAxis {
+                    AxisMarks(values: .stride(by: .month, count: 1)) { _ in
+                        AxisGridLine()
+                    }
+                }
+                .frame(height: 120)
+                .overlay(alignment: .topLeading) {
+                    Text("\(vehicle.currencyRaw)/\(vehicle.fuelUnit.rawValue.prefix(3).lowercased())")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(Color.yellow)
+                        .padding([.top, .leading], 8)
+                }
+            )
+
+            Divider().background(Color.white.opacity(0.1))
+
+            // Efficiency Chart
+            syncableChart(
+                Chart(efficiencyData, id: \.date) { item in
+                    LineMark(
+                        x: .value("Date", item.date),
+                        y: .value("Efficiency", item.value)
+                    )
+                    .foregroundStyle(Color.pink)
+                    .interpolationMethod(.stepCenter)
+
+                    AreaMark(
+                        x: .value("Date", item.date),
+                        y: .value("Efficiency", item.value)
+                    )
+                    .foregroundStyle(LinearGradient(colors: [Color.pink.opacity(0.5), .clear], startPoint: .top, endPoint: .bottom))
+                    .interpolationMethod(.stepCenter)
+                }
+                .chartYAxis {
+                    AxisMarks(position: .trailing) { _ in
+                        AxisGridLine()
+                        AxisTick()
+                        AxisValueLabel()
+                    }
+                }
+                .chartXAxis {
+                    AxisMarks(values: .stride(by: .month, count: 1)) { _ in
+                        AxisGridLine()
+                        AxisTick()
+                        AxisValueLabel(format: .dateTime.month(.abbreviated).year(.twoDigits))
+                    }
+                }
+                .frame(height: 160)
+                .overlay(alignment: .topLeading) {
+                    Text(vehicle.efficiencyUnit.rawValue)
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(Color.pink)
+                        .padding([.top, .leading], 8)
+                }
+            )
+        }
+        .padding(.top, 8)
+        .padding(.bottom, 16)
+        .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
+    }
+
+    private var statsSummaryCard: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            if let eff = avgEff {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(String(format: "%.2f", eff))
+                        .font(.system(size: 40, weight: .bold, design: .rounded))
+                    Text(vehicle.efficiencyUnit.rawValue)
+                        .font(.title3.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(totalCost.formatted(.currency(code: vehicle.currencyRaw)))
+                    Text(avgPrice.formatted(.currency(code: vehicle.currencyRaw)) + "/\(vehicle.fuelUnit.rawValue.prefix(3).lowercased())")
+                    Text("\(Int(totalVolume)) \(vehicle.fuelUnit.rawValue.lowercased())")
+                }
+                Spacer()
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("\(Int(totalDistance)) \(vehicle.odometerUnit.rawValue.lowercased())")
+                    Text(String(format: "%.1f", distPerDay) + " \(vehicle.odometerUnit.rawValue.prefix(2).lowercased())/day")
+                    Text(costPerDay.formatted(.currency(code: vehicle.currencyRaw)) + "/day")
+                }
+            }
+            .font(.subheadline.weight(.medium))
+        }
+        .padding()
+        .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
+    }
+
     /// Compares efficiency across the fuel grades this vehicle has actually used
     /// (e.g. E85 vs Regular). Only shown when more than one grade is recorded,
     /// since that's the case where a single blended average is misleading.
@@ -350,7 +380,6 @@ struct VehicleChartsView: View {
             }
             .padding()
             .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
-            .padding(.horizontal)
         }
     }
 

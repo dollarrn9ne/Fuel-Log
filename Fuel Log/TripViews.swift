@@ -33,64 +33,152 @@ struct TripsListView: View {
     @Query private var categories: [TripCategory]
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
-    
+
     @State private var showingAdd = false
     @State private var tripToEdit: Trip?
-    
+    /// Sidebar selection on iPad. Unused on iPhone, which pushes instead.
+    @State private var selectedDestination: TripDestination?
+
+    enum TripDestination: Hashable {
+        case costCalculator, monthlyReports, trip(UUID)
+    }
+
     var trips: [Trip] { allTrips.filter { $0.vehicle?.id == vehicle.id } }
-    
+
     var body: some View {
-        ZStack {
-            Color(uiColor: .systemGroupedBackground).ignoresSafeArea()
-            List {
-                Section {
-                    NavigationLink(destination: TripCostCalculatorView(currency: vehicle.currencyRaw)) {
-                        HStack {
-                            Image(systemName: "dollarsign.arrow.circlepath")
-                                .font(.title3.weight(.bold))
-                                .foregroundStyle(Color.accentColor)
-                                .frame(width: 24)
-                            Text("Trip Cost Calculator")
-                                .font(.headline.weight(.bold))
-                        }
-                        .padding(.vertical, 4)
-                    }
-                    .listRowBackground(Color(uiColor: .secondarySystemGroupedBackground))
-                    NavigationLink(destination: MonthlyReportsView()) {
-                        HStack {
-                            Image(systemName: "clock.arrow.circlepath")
-                                .font(.title3.weight(.bold))
-                                .foregroundStyle(Color.accentColor)
-                                .frame(width: 24)
-                            Text("Monthly Reports")
-                                .font(.headline.weight(.bold))
-                        }
-                        .padding(.vertical, 4)
-                    }
-                    .listRowBackground(Color(uiColor: .secondarySystemGroupedBackground))
-                }
-                Section("Trip Log") {
-                    ForEach(trips) { trip in
-                        NavigationLink(destination: TripDetailView(trip: trip)) { TripRow(trip: trip) }
-                        .swipeActions(edge: .leading) { Button { tripToEdit = trip } label: { Label("Edit", systemImage: "pencil") } }.listRowBackground(Color(uiColor: .secondarySystemGroupedBackground))
-                    }.onDelete { offsets in 
-                        for i in offsets { 
-                            let trip = trips[i]
-                            trip.vehicle?.trips?.removeAll(where: { $0.id == trip.id })
-                            modelContext.delete(trip)
-                        }
-                        try? modelContext.save() 
-                    }
-                }
+        Group {
+            if UIDevice.current.userInterfaceIdiom == .pad {
+                padLayout
+            } else {
+                phoneLayout
             }
-            .overlay(Group { if trips.isEmpty { VStack { Spacer(); ContentUnavailableView("No Trips", systemImage: "map", description: Text("Tap + to log your first trip for \(vehicle.name).")); Spacer() }.offset(y: 40) } })
-            .scrollContentBackground(.hidden)
         }
-        .navigationTitle("Trips")
-        .toolbar { ToolbarItem(placement: .cancellationAction) { Button { dismiss() } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.primary).font(.title3) } }; ToolbarItem(placement: .topBarTrailing) { Button { showingAdd = true } label: { Image(systemName: "plus.circle.fill").font(.title2) } } }
         .sheet(isPresented: $showingAdd) { NavigationStack { AddTripView(defaultVehicle: vehicle) } }
         .sheet(item: $tripToEdit) { t in NavigationStack { AddTripView(editingTrip: t) } }
         .onAppear { if categories.isEmpty { ["Business", "Personal", "Vacation"].forEach { modelContext.insert(TripCategory(name: $0)) }; try? modelContext.save() } }
+    }
+
+    /// One list that pushes to its destinations, the way it always has. Right
+    /// for a phone, where a sidebar would only add a level to dive through.
+    private var phoneLayout: some View {
+        NavigationStack {
+            ZStack {
+                Color(uiColor: .systemGroupedBackground).ignoresSafeArea()
+                List {
+                    Section {
+                        NavigationLink(destination: TripCostCalculatorView(currency: vehicle.currencyRaw)) {
+                            HStack {
+                                Image(systemName: "dollarsign.arrow.circlepath")
+                                    .font(.title3.weight(.bold))
+                                    .foregroundStyle(Color.accentColor)
+                                    .frame(width: 24)
+                                Text("Trip Cost Calculator")
+                                    .font(.headline.weight(.bold))
+                            }
+                            .padding(.vertical, 4)
+                        }
+                        .listRowBackground(Color(uiColor: .secondarySystemGroupedBackground))
+                        NavigationLink(destination: MonthlyReportsView()) {
+                            HStack {
+                                Image(systemName: "clock.arrow.circlepath")
+                                    .font(.title3.weight(.bold))
+                                    .foregroundStyle(Color.accentColor)
+                                    .frame(width: 24)
+                                Text("Monthly Reports")
+                                    .font(.headline.weight(.bold))
+                            }
+                            .padding(.vertical, 4)
+                        }
+                        .listRowBackground(Color(uiColor: .secondarySystemGroupedBackground))
+                    }
+                    Section("Trip Log") {
+                        ForEach(trips) { trip in
+                            NavigationLink(destination: TripDetailView(trip: trip)) { TripRow(trip: trip) }
+                            .swipeActions(edge: .leading) { Button { tripToEdit = trip } label: { Label("Edit", systemImage: "pencil") } }.listRowBackground(Color(uiColor: .secondarySystemGroupedBackground))
+                        }.onDelete(perform: deleteTrips)
+                    }
+                }
+                .overlay(emptyStateOverlay)
+                .scrollContentBackground(.hidden)
+            }
+            .navigationTitle("Trips")
+            .toolbar { closeButton; addButton }
+        }
+    }
+
+    /// The same rows in a sidebar, with whichever one is selected shown
+    /// alongside rather than pushed over it - the calculator and monthly
+    /// reports read as destinations in their own right, so they're selectable
+    /// rows too rather than being buried above a list that's otherwise all
+    /// trips.
+    private var padLayout: some View {
+        NavigationSplitView {
+            List(selection: $selectedDestination) {
+                Section {
+                    Label("Trip Cost Calculator", systemImage: "dollarsign.arrow.circlepath")
+                        .tag(TripDestination.costCalculator)
+                    Label("Monthly Reports", systemImage: "clock.arrow.circlepath")
+                        .tag(TripDestination.monthlyReports)
+                }
+                Section("Trip Log") {
+                    ForEach(trips) { trip in
+                        TripRow(trip: trip)
+                            .tag(TripDestination.trip(trip.id))
+                            .swipeActions(edge: .leading) { Button { tripToEdit = trip } label: { Label("Edit", systemImage: "pencil") } }
+                    }.onDelete(perform: deleteTrips)
+                }
+            }
+            .overlay(emptyStateOverlay)
+            .navigationTitle("Trips")
+            .toolbar { closeButton; addButton }
+        } detail: {
+            // Its own stack, so a selected trip can still push to its edit sheet
+            // or map without disturbing the sidebar's selection.
+            NavigationStack {
+                switch selectedDestination {
+                case .costCalculator:
+                    TripCostCalculatorView(currency: vehicle.currencyRaw)
+                case .monthlyReports:
+                    MonthlyReportsView()
+                case .trip(let id):
+                    if let trip = trips.first(where: { $0.id == id }) {
+                        TripDetailView(trip: trip)
+                    } else {
+                        ContentUnavailableView("Trip Deleted", systemImage: "map.slash")
+                    }
+                case nil:
+                    ContentUnavailableView("Select a Trip", systemImage: "map", description: Text("Choose a trip from the list, or use the calculator above it."))
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var emptyStateOverlay: some View {
+        if trips.isEmpty {
+            VStack { Spacer(); ContentUnavailableView("No Trips", systemImage: "map", description: Text("Tap + to log your first trip for \(vehicle.name).")); Spacer() }.offset(y: 40)
+        }
+    }
+
+    private var closeButton: some ToolbarContent {
+        ToolbarItem(placement: .cancellationAction) {
+            Button { dismiss() } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.primary).font(.title3) }
+        }
+    }
+
+    private var addButton: some ToolbarContent {
+        ToolbarItem(placement: .topBarTrailing) {
+            Button { showingAdd = true } label: { Image(systemName: "plus.circle.fill").font(.title2) }
+        }
+    }
+
+    private func deleteTrips(at offsets: IndexSet) {
+        for i in offsets {
+            let trip = trips[i]
+            trip.vehicle?.trips?.removeAll(where: { $0.id == trip.id })
+            modelContext.delete(trip)
+        }
+        try? modelContext.save()
     }
 }
 
@@ -153,7 +241,7 @@ struct TripDetailView: View {
                             FlightPathMap(events: relevantEvents, showLines: true, mapStyle: .standard, bottomPadding: 0, selectedItemID: $selectedEventID, position: .constant(.automatic), reservesRoomForAnnotationLabels: true)
                                 .frame(height: 250).clipShape(RoundedRectangle(cornerRadius: 32, style: .continuous)).padding(.horizontal, 8).padding(.top, 8)
                                 .onChange(of: selectedEventID) { _, newID in if let id = newID, let ev = relevantEvents.first(where: { $0.id == id }) { mapEventToView = ev; selectedEventID = nil } }
-                            Button { showFullScreenMap = true } label: { Image(systemName: "arrow.up.left.and.arrow.down.right").font(.subheadline.weight(.bold)).foregroundColor(.primary).padding(10).background(.regularMaterial).clipShape(Circle()).shadow(radius: 2) }.padding(16)
+                            Button { showFullScreenMap = true } label: { Image(systemName: "arrow.up.left.and.arrow.down.right").font(.subheadline.weight(.bold)).foregroundColor(.primary).padding(10).background(.regularMaterial).clipShape(Circle()).shadow(radius: 2) }.padding(16).hoverEffect(.highlight)
                         }.padding(.horizontal, 8).padding(.top, 8)
                     }
                     HStack(spacing: 12) {

@@ -106,7 +106,7 @@ struct LocationPickerView: View {
                     Spacer()
                     Button {
                         if let loc = locationManager.location { withAnimation(.easeInOut) { position = .region(MKCoordinateRegion(center: loc.coordinate, latitudinalMeters: 1000, longitudinalMeters: 1000)) } } else { locationManager.onLocationUpdate = { loc in withAnimation(.easeInOut) { position = .region(MKCoordinateRegion(center: loc.coordinate, latitudinalMeters: 1000, longitudinalMeters: 1000)) } }; locationManager.requestLocation() }
-                    } label: { Image(systemName: "location.fill").font(.title3).padding().background(.regularMaterial).clipShape(Circle()).shadow(radius: 4) }.padding()
+                    } label: { Image(systemName: "location.fill").font(.title3).padding().background(.regularMaterial).clipShape(Circle()).shadow(radius: 4) }.padding().hoverEffect(.highlight)
                 }
             }
             
