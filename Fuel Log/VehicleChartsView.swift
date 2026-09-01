@@ -170,21 +170,36 @@ struct VehicleChartsView: View {
 
                         if filteredFills.count > 1 {
                             // iPad's own branch, kept separate from iPhone's below so a
-                            // change made for one screen size can't reach the other: it
-                            // used to put the chart and the stats side by side, which
-                            // read as the two competing for the same cramped column
-                            // instead of each getting the width it needed. Now it's the
-                            // same chart-then-details order as iPhone, just with a
-                            // taller chart and a third grid column since there's width
-                            // to spare.
+                            // change made for one screen size can't reach the other.
                             if isWideLayout(proxy) {
-                                VStack(spacing: 16) {
-                                    chartsCard(priceHeight: 200, efficiencyHeight: 280)
-                                    heroEfficiencyCard
-                                    statsTileGrid(columns: 3)
-                                    gradeComparisonCard
+                                if isPortrait(proxy) {
+                                    // Portrait: chart on top, details below. The side by
+                                    // side split (still used in landscape, right below)
+                                    // read here as the chart and the stats competing for
+                                    // the same cramped column instead of each getting the
+                                    // width it needed.
+                                    VStack(spacing: 16) {
+                                        chartsCard(priceHeight: 200, efficiencyHeight: 280)
+                                        heroEfficiencyCard
+                                        statsTileGrid(columns: 3)
+                                        gradeComparisonCard
+                                    }
+                                    .padding(.horizontal)
+                                } else {
+                                    // Landscape: unchanged - the chart and a column of
+                                    // stats beside it, which the width here suits fine.
+                                    let heights = landscapeChartHeights(for: proxy)
+                                    HStack(alignment: .top, spacing: 20) {
+                                        chartsCard(priceHeight: heights.price, efficiencyHeight: heights.efficiency)
+                                        VStack(spacing: 16) {
+                                            heroEfficiencyCard
+                                            statsTileGrid(columns: 2)
+                                            gradeComparisonCard
+                                        }
+                                        .frame(width: 380)
+                                    }
+                                    .padding(.horizontal)
                                 }
-                                .padding(.horizontal)
                             } else {
                                 VStack(spacing: 16) {
                                     chartsCard(priceHeight: 120, efficiencyHeight: 160)
@@ -221,6 +236,21 @@ struct VehicleChartsView: View {
     /// same handful of tiles thinner rather than looking more considered.
     private func isWideLayout(_ proxy: GeometryProxy) -> Bool {
         UIDevice.current.userInterfaceIdiom == .pad && proxy.size.width > 700
+    }
+
+    private func isPortrait(_ proxy: GeometryProxy) -> Bool {
+        proxy.size.height >= proxy.size.width
+    }
+
+    /// Landscape keeps the side-by-side split, and the chart's height is sized
+    /// off the window the way it originally was there: proportional to the
+    /// leftover height, floored and capped rather than the portrait branch's
+    /// fixed numbers.
+    private func landscapeChartHeights(for proxy: GeometryProxy) -> (price: CGFloat, efficiency: CGFloat) {
+        let available = proxy.size.height - 100
+        let price = min(max(available * 0.24, 200), 320)
+        let efficiency = min(max(available * 0.34, 260), 460)
+        return (price, efficiency)
     }
 
     @ViewBuilder
