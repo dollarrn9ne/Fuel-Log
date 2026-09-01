@@ -29,7 +29,6 @@ import FuelLogShared
 // MARK: - Main Dashboard
 struct MainDashboardView: View {
     @Environment(\.colorScheme) var colorScheme
-    @Environment(\.modelContext) private var modelContext
     let vehicle: Vehicle
     let allVehicles: [Vehicle]
     let onSelectVehicle: (UUID) -> Void
@@ -337,37 +336,7 @@ struct MainDashboardView: View {
             }
             if let command { menuCommands.consume(command) }
         }
-        // Presentations that used to live on DashboardSheetContent, and whose
-        // flags moved up here with them: see the state block above for why.
-        .sheet(isPresented: $showingAddFillUp) { NavigationStack { AddFillUpView(vehicle: vehicle, entryMode: fillUpEntryMode) }.roomySheetOnPad() }
-        .sheet(isPresented: $showingAddService) { NavigationStack { AddServiceView(vehicle: vehicle) }.roomySheetOnPad() }
-        .sheet(item: $eventToEdit) { ev in NavigationStack { switch ev { case .fillUp(let f): AddFillUpView(vehicle: vehicle, editingFillUp: f); case .service(let s): AddServiceView(vehicle: vehicle, editingService: s) } }.roomySheetOnPad() }
-        .sheet(isPresented: $showingAddVehicle) { NavigationStack { AddVehicleView() }.roomySheetOnPad() }
-        .sheet(item: $vehicleToEdit) { v in NavigationStack { AddVehicleView(editingVehicle: v) }.roomySheetOnPad() }
-        .sheet(isPresented: $showingArchivedVehicles) { ArchivedVehiclesView().roomySheetOnPad() }
-        .alert("Delete \(vehicle.name)?", isPresented: $showingDeleteConfirmation) { Button("Cancel", role: .cancel) {}; Button("Delete", role: .destructive) { deleteVehicle() } } message: { Text("This will permanently delete this vehicle and all logs.") }
-        .sheet(isPresented: $showingMonthlyReport) { NavigationStack { MonthlyReportView(month: monthlyReportMonth, isModal: true) }.roomySheetOnPad() }
-        // Always a full-screen cover, on iPhone and iPad alike, for the three
-        // presentations that build their own width-aware layout (a split view or
-        // a wide two-column arrangement on iPad). A `.page`-sized sheet boxed
-        // those in: in portrait it stayed narrow enough to never earn its wide
-        // layout, and in landscape it floated as an undersized card rather than
-        // filling the screen.
-        .fullScreenCover(isPresented: $showingSettings) {
-            SettingsView()
         }
-        .fullScreenCover(isPresented: $showingTrips) {
-            TripsListView(vehicle: vehicle)
-        }
-        .fullScreenCover(isPresented: $showingCharts) {
-            VehicleChartsView(vehicle: vehicle)
-        }
-        }
-    }
-
-    private func deleteVehicle() {
-        modelContext.delete(vehicle)
-        try? modelContext.save()
     }
 
     /// Re-frames the map whenever the sheet resizes, so the pins stay centred in
@@ -710,6 +679,41 @@ struct DashboardSheetContent: View {
                 }
             }
         }
+        // Presentations for this content's own actions. Nested here rather
+        // than on MainDashboardView: on iPhone this view is itself always
+        // inside a permanently-presented sheet (see the .bottomSheet case
+        // below), and a second .sheet/.fullScreenCover attached to that same
+        // outer view while one is already showing is an invalid
+        // configuration - SwiftUI logs it and the presentation state wedges,
+        // which is what made every button on iPhone stop responding. Nesting
+        // these here presents them on top of the existing sheet instead of
+        // competing with it. The flags themselves still live on
+        // MainDashboardView (see its state block for why), so they survive
+        // this view being torn down and rebuilt when iPad's layout swaps
+        // between the side panel and the bottom panel.
+        .sheet(isPresented: $showingAddFillUp) { NavigationStack { AddFillUpView(vehicle: vehicle, entryMode: fillUpEntryMode) }.roomySheetOnPad() }
+        .sheet(isPresented: $showingAddService) { NavigationStack { AddServiceView(vehicle: vehicle) }.roomySheetOnPad() }
+        .sheet(item: $eventToEdit) { ev in NavigationStack { switch ev { case .fillUp(let f): AddFillUpView(vehicle: vehicle, editingFillUp: f); case .service(let s): AddServiceView(vehicle: vehicle, editingService: s) } }.roomySheetOnPad() }
+        .sheet(isPresented: $showingAddVehicle) { NavigationStack { AddVehicleView() }.roomySheetOnPad() }
+        .sheet(item: $vehicleToEdit) { v in NavigationStack { AddVehicleView(editingVehicle: v) }.roomySheetOnPad() }
+        .sheet(isPresented: $showingArchivedVehicles) { ArchivedVehiclesView().roomySheetOnPad() }
+        .alert("Delete \(vehicle.name)?", isPresented: $showingDeleteConfirmation) { Button("Cancel", role: .cancel) {}; Button("Delete", role: .destructive) { deleteVehicle() } } message: { Text("This will permanently delete this vehicle and all logs.") }
+        .sheet(isPresented: $showingMonthlyReport) { NavigationStack { MonthlyReportView(month: monthlyReportMonth, isModal: true) }.roomySheetOnPad() }
+        // Always a full-screen cover, on iPhone and iPad alike, for the three
+        // presentations that build their own width-aware layout (a split view or
+        // a wide two-column arrangement on iPad). A `.page`-sized sheet boxed
+        // those in: in portrait it stayed narrow enough to never earn its wide
+        // layout, and in landscape it floated as an undersized card rather than
+        // filling the screen.
+        .fullScreenCover(isPresented: $showingSettings) {
+            SettingsView()
+        }
+        .fullScreenCover(isPresented: $showingTrips) {
+            TripsListView(vehicle: vehicle)
+        }
+        .fullScreenCover(isPresented: $showingCharts) {
+            VehicleChartsView(vehicle: vehicle)
+        }
         // Menu commands that open one of this view's presentations.
         .onChange(of: sheetMenuCommands.pending) { _, command in
             switch command {
@@ -995,6 +999,10 @@ struct DashboardSheetContent: View {
         }
     }
 
+    private func deleteVehicle() {
+        modelContext.delete(vehicle)
+        try? modelContext.save()
+    }
 
     private func deleteEvent(_ event: VehicleEvent) {
         switch event { 
