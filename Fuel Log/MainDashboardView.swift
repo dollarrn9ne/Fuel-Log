@@ -29,12 +29,13 @@ import FuelLogShared
 // MARK: - Main Dashboard
 struct MainDashboardView: View {
     @Environment(\.colorScheme) var colorScheme
+    @Environment(\.modelContext) private var modelContext
     let vehicle: Vehicle
     let allVehicles: [Vehicle]
     let onSelectVehicle: (UUID) -> Void
     let newReportMonth: Date?
     let onAcknowledgeReport: () -> Void
-    
+
     @State private var showFullScreenMap = false
     @State private var useSatellite = false
     @State private var selectedEventID: UUID?
@@ -50,6 +51,26 @@ struct MainDashboardView: View {
     @State private var layoutMode: DashboardLayout = .bottomSheet
     /// Settled height of the portrait card, as a fraction of the screen.
     @State private var cardHeightFraction: CGFloat = 0.34
+
+    /// Every sheet/alert flag DashboardSheetContent's presentations depend on,
+    /// owned here rather than there. On iPad the sheet content is rebuilt from
+    /// scratch whenever a rotation crosses the side-panel/bottom-panel width
+    /// threshold (see `layout(_:)` below), which used to reset this state and
+    /// silently dismiss whatever was open. This view isn't rebuilt on that
+    /// switch, only its overlay contents are, so state living here survives it.
+    @State private var showingAddFillUp = false
+    @State private var fillUpEntryMode: FillUpEntryMode = .fuel
+    @State private var showingAddService = false
+    @State private var showingTrips = false
+    @State private var showingSettings = false
+    @State private var showingArchivedVehicles = false
+    @State private var showingAddVehicle = false
+    @State private var showingDeleteConfirmation = false
+    @State private var showingCharts = false
+    @State private var showingMonthlyReport = false
+    @State private var monthlyReportMonth = Date()
+    @State private var eventToEdit: VehicleEvent?
+    @State private var vehicleToEdit: Vehicle?
 
     /// Where the dashboard content sits relative to the map.
     private enum DashboardLayout { case bottomSheet, sidePanel, bottomPanel }
@@ -289,7 +310,7 @@ struct MainDashboardView: View {
             Task { refitMap(containerHeight: fullHeight(proxy), refreshZoom: true) }
         }
         .sheet(isPresented: .constant(layout(proxy) == .bottomSheet)) {
-            DashboardSheetContent(colorScheme: _colorScheme, vehicle: vehicle, allVehicles: allVehicles, events: timelineEvents, onSelectVehicle: onSelectVehicle, newReportMonth: newReportMonth, onAcknowledgeReport: onAcknowledgeReport, selectedLogTab: $selectedLogTab, sheetDetent: $sheetDetent)
+            DashboardSheetContent(colorScheme: _colorScheme, vehicle: vehicle, allVehicles: allVehicles, events: timelineEvents, onSelectVehicle: onSelectVehicle, newReportMonth: newReportMonth, onAcknowledgeReport: onAcknowledgeReport, selectedLogTab: $selectedLogTab, sheetDetent: $sheetDetent, showingAddFillUp: $showingAddFillUp, fillUpEntryMode: $fillUpEntryMode, showingAddService: $showingAddService, showingTrips: $showingTrips, showingSettings: $showingSettings, showingArchivedVehicles: $showingArchivedVehicles, showingAddVehicle: $showingAddVehicle, showingDeleteConfirmation: $showingDeleteConfirmation, showingCharts: $showingCharts, showingMonthlyReport: $showingMonthlyReport, monthlyReportMonth: $monthlyReportMonth, eventToEdit: $eventToEdit, vehicleToEdit: $vehicleToEdit)
                 .presentationDetents([.fraction(0.35), .fraction(0.65), .large], selection: $sheetDetent)
                 .presentationDragIndicator(.visible).presentationBackgroundInteraction(.enabled(upThrough: .fraction(0.65))).interactiveDismissDisabled()
                 .presentationBackground { panelBackground(in: Rectangle()) }
@@ -307,7 +328,40 @@ struct MainDashboardView: View {
             }
             if let command { menuCommands.consume(command) }
         }
+        // Presentations that used to live on DashboardSheetContent, and whose
+        // flags moved up here with them: see the state block above for why.
+        .sheet(isPresented: $showingAddFillUp) { NavigationStack { AddFillUpView(vehicle: vehicle, entryMode: fillUpEntryMode) }.roomySheetOnPad() }
+        .sheet(isPresented: $showingAddService) { NavigationStack { AddServiceView(vehicle: vehicle) }.roomySheetOnPad() }
+        .sheet(item: $eventToEdit) { ev in NavigationStack { switch ev { case .fillUp(let f): AddFillUpView(vehicle: vehicle, editingFillUp: f); case .service(let s): AddServiceView(vehicle: vehicle, editingService: s) } }.roomySheetOnPad() }
+        .sheet(isPresented: $showingAddVehicle) { NavigationStack { AddVehicleView() }.roomySheetOnPad() }
+        .sheet(item: $vehicleToEdit) { v in NavigationStack { AddVehicleView(editingVehicle: v) }.roomySheetOnPad() }
+        .sheet(isPresented: $showingArchivedVehicles) { ArchivedVehiclesView().roomySheetOnPad() }
+        .sheet(isPresented: $showingCharts) { VehicleChartsView(vehicle: vehicle).roomySheetOnPad() }
+        .alert("Delete \(vehicle.name)?", isPresented: $showingDeleteConfirmation) { Button("Cancel", role: .cancel) {}; Button("Delete", role: .destructive) { deleteVehicle() } } message: { Text("This will permanently delete this vehicle and all logs.") }
+        // A sheet that adapts to a full-screen cover when compact, rather than a
+        // cover everywhere. Taking over the whole iPad for a secondary task hides
+        // the map and the vehicle you were looking at; on a phone the cover is
+        // still right. Declared as one presentation so the view keeps its
+        // identity across a rotation rather than being torn down and rebuilt.
+        .sheet(isPresented: $showingTrips) {
+            NavigationStack { TripsListView(vehicle: vehicle) }
+                .presentationCompactAdaptation(.fullScreenCover)
+                .roomySheetOnPad()
         }
+        .sheet(isPresented: $showingMonthlyReport) { NavigationStack { MonthlyReportView(month: monthlyReportMonth, isModal: true) }.roomySheetOnPad() }
+        // Always a full-screen cover, on iPhone and iPad alike: SettingsView
+        // supplies its own full-width container (a split view on iPad, a stack
+        // on iPhone), and a `.page`-sized sheet only boxed that in and left the
+        // split view's detail text cramped and clipped on iPad.
+        .fullScreenCover(isPresented: $showingSettings) {
+            SettingsView()
+        }
+        }
+    }
+
+    private func deleteVehicle() {
+        modelContext.delete(vehicle)
+        try? modelContext.save()
     }
 
     /// Re-frames the map whenever the sheet resizes, so the pins stay centred in
@@ -326,7 +380,7 @@ struct MainDashboardView: View {
     /// Full-height panel pinned to the trailing edge. Nothing is hidden behind a
     /// detent here, so every row is reachable by scrolling.
     private var sidePanel: some View {
-        DashboardSheetContent(colorScheme: _colorScheme, vehicle: vehicle, allVehicles: allVehicles, events: timelineEvents, onSelectVehicle: onSelectVehicle, newReportMonth: newReportMonth, onAcknowledgeReport: onAcknowledgeReport, selectedLogTab: $selectedLogTab, sheetDetent: .constant(.large))
+        DashboardSheetContent(colorScheme: _colorScheme, vehicle: vehicle, allVehicles: allVehicles, events: timelineEvents, onSelectVehicle: onSelectVehicle, newReportMonth: newReportMonth, onAcknowledgeReport: onAcknowledgeReport, selectedLogTab: $selectedLogTab, sheetDetent: .constant(.large), showingAddFillUp: $showingAddFillUp, fillUpEntryMode: $fillUpEntryMode, showingAddService: $showingAddService, showingTrips: $showingTrips, showingSettings: $showingSettings, showingArchivedVehicles: $showingArchivedVehicles, showingAddVehicle: $showingAddVehicle, showingDeleteConfirmation: $showingDeleteConfirmation, showingCharts: $showingCharts, showingMonthlyReport: $showingMonthlyReport, monthlyReportMonth: $monthlyReportMonth, eventToEdit: $eventToEdit, vehicleToEdit: $vehicleToEdit)
             .frame(width: Self.panelWidth)
             .frame(maxHeight: .infinity)
             .background {
@@ -380,7 +434,7 @@ struct MainDashboardView: View {
         let width = min(preferred, available)
         return VStack(spacing: 0) {
             bottomCardPullBar(full: full)
-            DashboardSheetContent(colorScheme: _colorScheme, vehicle: vehicle, allVehicles: allVehicles, events: timelineEvents, onSelectVehicle: onSelectVehicle, newReportMonth: newReportMonth, onAcknowledgeReport: onAcknowledgeReport, selectedLogTab: $selectedLogTab, sheetDetent: .constant(.large))
+            DashboardSheetContent(colorScheme: _colorScheme, vehicle: vehicle, allVehicles: allVehicles, events: timelineEvents, onSelectVehicle: onSelectVehicle, newReportMonth: newReportMonth, onAcknowledgeReport: onAcknowledgeReport, selectedLogTab: $selectedLogTab, sheetDetent: .constant(.large), showingAddFillUp: $showingAddFillUp, fillUpEntryMode: $fillUpEntryMode, showingAddService: $showingAddService, showingTrips: $showingTrips, showingSettings: $showingSettings, showingArchivedVehicles: $showingArchivedVehicles, showingAddVehicle: $showingAddVehicle, showingDeleteConfirmation: $showingDeleteConfirmation, showingCharts: $showingCharts, showingMonthlyReport: $showingMonthlyReport, monthlyReportMonth: $monthlyReportMonth, eventToEdit: $eventToEdit, vehicleToEdit: $vehicleToEdit)
         }
             .frame(width: width, height: full * cardHeightFraction)
             .background { panelBackground(in: cardShape, frosted: true) }
@@ -575,20 +629,24 @@ struct DashboardSheetContent: View {
     let onAcknowledgeReport: () -> Void
     @Binding var selectedLogTab: LogTabChoice
     @Binding var sheetDetent: PresentationDetent
-    
-    @State private var showingAddFillUp = false
-    @State private var fillUpEntryMode: FillUpEntryMode = .fuel
-    @State private var showingAddService = false
-    @State private var showingTrips = false
-    @State private var showingSettings = false
-    @State private var showingArchivedVehicles = false
-    @State private var showingAddVehicle = false
-    @State private var showingDeleteConfirmation = false
-    @State private var showingCharts = false
-    @State private var showingMonthlyReport = false
-    @State private var monthlyReportMonth = Date()
-    @State private var eventToEdit: VehicleEvent?
-    @State private var vehicleToEdit: Vehicle?
+
+    /// Owned by MainDashboardView, not here: this view is rebuilt from scratch
+    /// whenever an iPad rotation crosses the side-panel/bottom-panel width
+    /// threshold, and local @State here would reset (dismissing whatever was
+    /// open) exactly when that happened.
+    @Binding var showingAddFillUp: Bool
+    @Binding var fillUpEntryMode: FillUpEntryMode
+    @Binding var showingAddService: Bool
+    @Binding var showingTrips: Bool
+    @Binding var showingSettings: Bool
+    @Binding var showingArchivedVehicles: Bool
+    @Binding var showingAddVehicle: Bool
+    @Binding var showingDeleteConfirmation: Bool
+    @Binding var showingCharts: Bool
+    @Binding var showingMonthlyReport: Bool
+    @Binding var monthlyReportMonth: Date
+    @Binding var eventToEdit: VehicleEvent?
+    @Binding var vehicleToEdit: Vehicle?
     @State private var vehicleShareItem: VehicleShareItem?
     
     @State private var searchText: String = ""
@@ -644,32 +702,6 @@ struct DashboardSheetContent: View {
                     logViewArea
                 }
             }
-        }
-        .sheet(isPresented: $showingAddFillUp) { NavigationStack { AddFillUpView(vehicle: vehicle, entryMode: fillUpEntryMode) }.roomySheetOnPad() }
-        .sheet(isPresented: $showingAddService) { NavigationStack { AddServiceView(vehicle: vehicle) }.roomySheetOnPad() }
-        .sheet(item: $eventToEdit) { ev in NavigationStack { switch ev { case .fillUp(let f): AddFillUpView(vehicle: vehicle, editingFillUp: f); case .service(let s): AddServiceView(vehicle: vehicle, editingService: s) } }.roomySheetOnPad() }
-        .sheet(isPresented: $showingAddVehicle) { NavigationStack { AddVehicleView() }.roomySheetOnPad() }
-        .sheet(item: $vehicleToEdit) { v in NavigationStack { AddVehicleView(editingVehicle: v) }.roomySheetOnPad() }
-        .sheet(isPresented: $showingArchivedVehicles) { ArchivedVehiclesView().roomySheetOnPad() }
-        .sheet(isPresented: $showingCharts) { VehicleChartsView(vehicle: vehicle).roomySheetOnPad() }
-        .alert("Delete \(vehicle.name)?", isPresented: $showingDeleteConfirmation) { Button("Cancel", role: .cancel) {}; Button("Delete", role: .destructive) { deleteEvent(vehicle) } } message: { Text("This will permanently delete this vehicle and all logs.") }
-        // A sheet that adapts to a full-screen cover when compact, rather than a
-        // cover everywhere. Taking over the whole iPad for a secondary task hides
-        // the map and the vehicle you were looking at; on a phone the cover is
-        // still right. Declared as one presentation so the view keeps its
-        // identity across a rotation rather than being torn down and rebuilt.
-        .sheet(isPresented: $showingTrips) {
-            NavigationStack { TripsListView(vehicle: vehicle) }
-                .presentationCompactAdaptation(.fullScreenCover)
-                .roomySheetOnPad()
-        }
-        .sheet(isPresented: $showingMonthlyReport) { NavigationStack { MonthlyReportView(month: monthlyReportMonth, isModal: true) }.roomySheetOnPad() }
-        .sheet(isPresented: $showingSettings) {
-            // No NavigationStack here: SettingsView supplies its own container,
-            // a split view on iPad and a stack on iPhone.
-            SettingsView()
-                .presentationCompactAdaptation(.fullScreenCover)
-                .roomySheetOnPad()
         }
         // Menu commands that open one of this view's presentations.
         .onChange(of: sheetMenuCommands.pending) { _, command in
@@ -950,12 +982,7 @@ struct DashboardSheetContent: View {
         }
     }
 
-    
-    private func deleteEvent(_ vehicleToDelete: Vehicle) {
-        modelContext.delete(vehicleToDelete)
-        try? modelContext.save()
-    }
-    
+
     private func deleteEvent(_ event: VehicleEvent) {
         switch event { 
         case .fillUp(let f): 
