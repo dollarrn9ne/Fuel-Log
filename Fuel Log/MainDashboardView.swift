@@ -164,6 +164,16 @@ struct MainDashboardView: View {
     /// exactly where windows get parked.
     private func layout(_ proxy: GeometryProxy) -> DashboardLayout {
         guard UIDevice.current.userInterfaceIdiom == .pad else { return .bottomSheet }
+        // The side panel only ever makes sense with width to spare beside the
+        // map, so a portrait-shaped window is always the card - regardless of
+        // hysteresis. Without this coarse guard, a 13" iPad's portrait width
+        // (1032pt) sits *above* the hysteresis-lowered threshold (1020pt), so
+        // rotating landscape -> portrait right after the side panel had shown
+        // left portrait stuck showing the side panel too. This is a guard at
+        // the extreme (width <= height), not the continuous ratio comparison
+        // that used to flicker on a near-square drag - real portrait/landscape
+        // aspects aren't anywhere near that boundary.
+        guard proxy.size.width > proxy.size.height else { return .bottomPanel }
         let threshold = layoutMode == .sidePanel
             ? Self.sidePanelMinimumWidth - Self.layoutSwitchHysteresis
             : Self.sidePanelMinimumWidth
@@ -699,15 +709,19 @@ struct DashboardSheetContent: View {
         .sheet(isPresented: $showingArchivedVehicles) { ArchivedVehiclesView().roomySheetOnPad() }
         .alert("Delete \(vehicle.name)?", isPresented: $showingDeleteConfirmation) { Button("Cancel", role: .cancel) {}; Button("Delete", role: .destructive) { deleteVehicle() } } message: { Text("This will permanently delete this vehicle and all logs.") }
         .sheet(isPresented: $showingMonthlyReport) { NavigationStack { MonthlyReportView(month: monthlyReportMonth, isModal: true) }.roomySheetOnPad() }
-        // Always a full-screen cover, on iPhone and iPad alike, for the three
-        // presentations that build their own width-aware layout (a split view or
-        // a wide two-column arrangement on iPad). A `.page`-sized sheet boxed
-        // those in: in portrait it stayed narrow enough to never earn its wide
-        // layout, and in landscape it floated as an undersized card rather than
-        // filling the screen.
-        .fullScreenCover(isPresented: $showingSettings) {
+        // A pop-up sheet again rather than a full-screen cover: Settings'
+        // sections are short (often a single toggle or picker), and filling
+        // the whole screen with the sidebar for that left most of it empty.
+        // The sidebar itself isn't going anywhere - SettingsView still picks
+        // its NavigationSplitView layout on iPad regardless of how roomy the
+        // sheet presenting it is; only the presentation's own size changes.
+        .sheet(isPresented: $showingSettings) {
             SettingsView()
+                .presentationCompactAdaptation(.fullScreenCover)
+                .roomySheetOnPad()
         }
+        // Trips and Charts stay full-screen: unlike Settings, their content
+        // (a trip list, or wide charts) actually grows to use the screen.
         .fullScreenCover(isPresented: $showingTrips) {
             TripsListView(vehicle: vehicle)
         }
