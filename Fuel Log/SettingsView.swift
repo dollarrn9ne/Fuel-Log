@@ -484,10 +484,21 @@ struct SettingsView: View {
     
     private func purgeAllData() {
         do {
+            // ShareToken isn't a SwiftData relationship on Vehicle - just a
+            // copied vehicleID - so it wouldn't be touched by the deletes
+            // below. Revoke each one's CloudKit subscription before it's
+            // wiped, the same way SharedLinksView.revoke does, so a borrower's
+            // link stops working rather than quietly outliving the vehicle it
+            // pointed to.
+            let activeTokens = try modelContext.fetch(FetchDescriptor<ShareToken>())
+            for token in activeTokens {
+                SharedLoggingImporter.shared.removeSubscription(for: token.token)
+            }
             try modelContext.delete(model: Vehicle.self)
             try modelContext.delete(model: Trip.self)
             try modelContext.delete(model: TripCategory.self)
             try modelContext.delete(model: GasLocation.self)
+            try modelContext.delete(model: ShareToken.self)
             try modelContext.save()
             lastSelectedVehicleID = ""
             dismiss()
