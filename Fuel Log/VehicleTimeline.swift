@@ -31,11 +31,15 @@ struct EmptyGarageView: View {
     @Binding var showingAdd: Bool
     @Environment(\.modelContext) private var modelContext
     @StateObject private var csvImporter = CSVImporter()
-    
+
     @State private var showingImportSourcePicker = false
     @State private var showFileImporter = false
     @State private var pendingImportSource: ImportSource = .none
     @State private var selectedEncoding: ExportEncoding = .utf8
+    /// Otherwise there's no way to reach Settings at all with no vehicle to
+    /// host the dashboard's own gearshape button - Danger Zone's restore, or
+    /// just checking Backup & Restore, shouldn't require adding a vehicle first.
+    @State private var showingSettings = false
     
     var body: some View {
         NavigationStack {
@@ -74,6 +78,11 @@ struct EmptyGarageView: View {
                 }.padding(24).centredContentColumn()
             }
             .navigationTitle("Garage")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { showingSettings = true } label: { Image(systemName: "gearshape.fill") }
+                }
+            }
             .fileImporter(isPresented: $showFileImporter, allowedContentTypes: [.commaSeparatedText]) { result in
                 if case .success(let url) = result, url.startAccessingSecurityScopedResource() {
                     if let data = try? String(contentsOf: url, encoding: selectedEncoding.stringEncoding) {
@@ -83,6 +92,11 @@ struct EmptyGarageView: View {
                 }
             }
             .overlay { if csvImporter.isImporting { ProgressOverlay(title: "Importing Data...", progress: csvImporter.importProgress) } }
+            .sheet(isPresented: $showingSettings) {
+                SettingsView()
+                    .presentationCompactAdaptation(.fullScreenCover)
+                    .roomySheetOnPad()
+            }
         }
     }
 }
