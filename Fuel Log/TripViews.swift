@@ -78,7 +78,7 @@ struct TripsListView: View {
                             .padding(.vertical, 4)
                         }
                         .listRowBackground(Color(uiColor: .secondarySystemGroupedBackground))
-                        NavigationLink(destination: MonthlyReportsView()) {
+                        NavigationLink(destination: MonthlyReportsView(vehicle: vehicle)) {
                             HStack {
                                 Image(systemName: "clock.arrow.circlepath")
                                     .font(.title3.weight(.bold))
@@ -139,7 +139,7 @@ struct TripsListView: View {
                 case .costCalculator:
                     TripCostCalculatorView(currency: vehicle.currencyRaw)
                 case .monthlyReports:
-                    MonthlyReportsView()
+                    MonthlyReportsView(vehicle: vehicle)
                 case .trip(let id):
                     if let trip = trips.first(where: { $0.id == id }) {
                         TripDetailView(trip: trip)

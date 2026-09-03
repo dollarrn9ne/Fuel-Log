@@ -51,6 +51,7 @@ struct MonthlyReport: Identifiable {
 
 struct MonthlyReportView: View {
     let month: Date
+    let vehicle: Vehicle
     var isModal: Bool = false
 
     @Environment(\.dismiss) private var dismiss
@@ -66,11 +67,11 @@ struct MonthlyReportView: View {
     }
 
     private var monthFillUps: [FillUp] {
-        allFillUps.filter { $0.date >= startOfMonth && $0.date < startOfNextMonth }.sorted { $0.date < $1.date }
+        allFillUps.filter { $0.vehicle?.id == vehicle.id && $0.date >= startOfMonth && $0.date < startOfNextMonth }.sorted { $0.date < $1.date }
     }
 
     private var monthServices: [ServiceRecord] {
-        allServices.filter { $0.date >= startOfMonth && $0.date < startOfNextMonth }.sorted { $0.date < $1.date }
+        allServices.filter { $0.vehicle?.id == vehicle.id && $0.date >= startOfMonth && $0.date < startOfNextMonth }.sorted { $0.date < $1.date }
     }
 
     private var milesDriven: Double? {
@@ -87,18 +88,14 @@ struct MonthlyReportView: View {
         totalVolume > 0 ? totalFuelCost / totalVolume : nil
     }
 
-    private var currencyCode: String {
-        monthFillUps.first?.vehicle?.currencyRaw
-            ?? allFillUps.first?.vehicle?.currencyRaw
-            ?? "USD"
-    }
+    private var currencyCode: String { vehicle.currencyRaw }
 
     private var fuelUnitName: String {
         monthFillUps.first?.unit.rawValue ?? "units"
     }
 
     private var distanceUnitName: String {
-        (monthFillUps.first?.vehicle?.odometerUnit ?? .miles).rawValue.lowercased()
+        vehicle.odometerUnit.rawValue.lowercased()
     }
 
     private var mapEvents: [VehicleEvent] {
@@ -183,6 +180,7 @@ struct MonthlyReportView: View {
 // MARK: - All Monthly Reports
 
 struct MonthlyReportsView: View {
+    let vehicle: Vehicle
     @Query(sort: \FillUp.date, order: .reverse) private var allFillUps: [FillUp]
     @Query(sort: \ServiceRecord.date, order: .reverse) private var allServices: [ServiceRecord]
 
@@ -190,7 +188,8 @@ struct MonthlyReportsView: View {
         var seen = Set<String>()
         var months: [MonthlyReport] = []
         let calendar = Calendar.current
-        let dates = allFillUps.map(\.date) + allServices.map(\.date)
+        let dates = allFillUps.filter { $0.vehicle?.id == vehicle.id }.map(\.date)
+            + allServices.filter { $0.vehicle?.id == vehicle.id }.map(\.date)
         for date in dates.sorted(by: >) {
             let key = date.monthIdentifier
             guard !seen.contains(key) else { continue }
@@ -210,7 +209,7 @@ struct MonthlyReportsView: View {
                 List {
                     Section("Monthly Reports") {
                         ForEach(monthsWithData) { report in
-                            NavigationLink(destination: MonthlyReportView(month: report.date)) {
+                            NavigationLink(destination: MonthlyReportView(month: report.date, vehicle: vehicle)) {
                                 Label(report.title, systemImage: "calendar")
                             }
                         }
