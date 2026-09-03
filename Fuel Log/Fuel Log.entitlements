@@ -22,5 +22,11 @@
 	<array>
 		<string>appclips:inputfuellog.app</string>
 	</array>
+	<!-- CarPlay Fueling App capability, granted by Apple on 2026-09-02. No
+	     separate "fueling" entitlement key exists; Fueling apps use the same
+	     key and templates (CPPointOfInterestTemplate, CPInformationTemplate)
+	     as EV-charging apps. -->
+	<key>com.apple.developer.carplay-charging</key>
+	<true/>
 </dict>
 </plist>
