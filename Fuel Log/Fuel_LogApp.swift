@@ -9,6 +9,7 @@ import SwiftUI
 import SwiftData
 import Combine
 import CloudKit
+import CarPlay
 @preconcurrency import UserNotifications
 import FuelLogShared
 
@@ -115,6 +116,16 @@ class AppDelegate: NSObject, UIApplicationDelegate {
     func application(_ application: UIApplication, configurationForConnecting connectingSceneSession: UISceneSession, options: UIScene.ConnectionOptions) -> UISceneConfiguration {
         if let shortcutItem = options.shortcutItem {
             QuickActionManager.shared.action = QuickActionManager.QuickAction(rawValue: shortcutItem.type)
+        }
+        // Implementing this method at all means UIKit asks it for every
+        // connecting scene, CarPlay's included - without this branch, the
+        // unconditional SceneDelegate-based configuration below would silently
+        // override the CarPlay configuration declared in Info.plist. Naming it
+        // here, matching the Info.plist entry's UISceneConfigurationName, lets
+        // UIKit fill in that entry's scene and delegate classes rather than
+        // needing them repeated here.
+        if connectingSceneSession.role == .carTemplateApplication {
+            return UISceneConfiguration(name: "FuelLogCarPlaySceneConfiguration", sessionRole: connectingSceneSession.role)
         }
         let configuration = UISceneConfiguration(name: nil, sessionRole: connectingSceneSession.role)
         configuration.delegateClass = SceneDelegate.self
@@ -283,6 +294,18 @@ final class SharedLoggingImporter {
     }
 }
 
+// MARK: - Shared Model Container
+//
+// A CarPlay scene connects outside the WindowGroup's SwiftUI hierarchy, so it
+// has no `.modelContainer` environment value to inherit. Both read the same
+// on-disk store either way, so rather than have CarPlaySceneDelegate build a
+// second container from FuelLogContainer.makeContainer() - duplicating the
+// self-heal/wipe logic for no reason - it just reads the one the app already
+// made.
+enum SharedModelContainer {
+    static var current: ModelContainer?
+}
+
 // MARK: - App Entry Point
 @main
 struct Fuel_LogApp: App {
@@ -290,6 +313,12 @@ struct Fuel_LogApp: App {
     @Environment(\.scenePhase) private var scenePhase
 
     var modelContainerResult: Result<ModelContainer, Error> = FuelLogContainer.makeContainer()
+
+    init() {
+        if case .success(let container) = modelContainerResult {
+            SharedModelContainer.current = container
+        }
+    }
 
     var body: some Scene {
         WindowGroup {
