@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- The App Clip does not track users and does not collect any data. A
+	     borrower's fill-up is written to the public CloudKit database keyed by
+	     the share token, read once by the vehicle's owner, and then deleted.
+	     Nothing is stored on the borrower's device. -->
+	<key>NSPrivacyTracking</key>
+	<false/>
+	<key>NSPrivacyTrackingDomains</key>
+	<array/>
+	<key>NSPrivacyCollectedDataTypes</key>
+	<array/>
+	<!-- Empty on purpose: the Clip uses none of the required-reason APIs. It
+	     reads no user defaults, touches no file timestamps, and asks for no
+	     system information. Declared rather than omitted so the absence is a
+	     statement instead of an oversight. -->
+	<key>NSPrivacyAccessedAPITypes</key>
+	<array/>
+</dict>
+</plist>
