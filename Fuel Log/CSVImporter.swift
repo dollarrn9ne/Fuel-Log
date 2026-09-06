@@ -69,15 +69,16 @@ class CSVImporter: ObservableObject {
         dateFormatter.dateStyle = .short; dateFormatter.timeStyle = .short
         
         var existingVehicles = (try? modelContext.fetch(FetchDescriptor<Vehicle>())) ?? []
+        var existingLocations = (try? modelContext.fetch(FetchDescriptor<GasLocation>())) ?? []
         let totalRows = Double(rows.count - 1)
-        
+
         for (index, row) in rows.dropFirst().enumerated() {
             if index % 20 == 0 { importProgress = Double(index) / totalRows; try? await Task.sleep(nanoseconds: 10_000_000) }
             guard row.count >= 8 else { continue }
-            
+
             let vehicleName = row[0], recordType = row[1], dateStr = row[2], odoStr = row[3]
             let costStr = row[4], detailsStr = row[5], locStr = row[6], notesStr = row[7]
-            
+
             let vehicle: Vehicle
             if let existing = existingVehicles.first(where: { $0.name == vehicleName }) {
                 vehicle = existing
@@ -87,12 +88,12 @@ class CSVImporter: ObservableObject {
                 existingVehicles.append(vehicle)
                 modelContext.insert(Trip(name: "Since Day One - \(vehicleName)", startDate: .distantPast, endDate: .distantFuture, vehicle: vehicle))
             }
-            
+
             let date = dateFormatter.date(from: dateStr) ?? parseFlexibleDate(dateStr) ?? Date()
             let odo = Double(odoStr)
             let cost = Double(costStr) ?? 0
-            let loc = locStr.isEmpty ? nil : GasLocation(name: locStr, latitude: 0, longitude: 0)
-            
+            let loc: GasLocation? = locStr.isEmpty ? nil : resolveLocation(name: locStr, latitude: 0, longitude: 0, cache: &existingLocations, modelContext: modelContext)
+
             if recordType == "Fuel" {
                 let components = detailsStr.components(separatedBy: " ")
                 let vol = components.first.flatMap { Double($0) } ?? 0
@@ -102,13 +103,11 @@ class CSVImporter: ObservableObject {
                 let grade = row.count > 8 ? FuelGrade(rawValue: row[8]) : nil
 
                 if !(vehicle.fillUps ?? []).contains(where: { abs($0.date.timeIntervalSince(date)) < 60 && $0.volume == vol }) {
-                    if let loc { modelContext.insert(loc) }
                     modelContext.insert(FillUp(date: date, odometer: odo, volume: vol, pricePerUnit: pricePerUnit, isFullTank: true, notes: notesStr, unit: unit, grade: grade, vehicle: vehicle, location: loc))
                 }
             } else if recordType == "Service" {
                 let type = ServiceType(rawValue: detailsStr) ?? .general
                 if !(vehicle.services ?? []).contains(where: { abs($0.date.timeIntervalSince(date)) < 60 && $0.type == type }) {
-                    if let loc { modelContext.insert(loc) }
                     modelContext.insert(ServiceRecord(date: date, odometer: odo ?? 0, type: type, cost: cost, notes: notesStr, vehicle: vehicle, location: loc))
                 }
             }
@@ -116,6 +115,22 @@ class CSVImporter: ObservableObject {
         try? modelContext.save()
     }
     
+    /// Reuses an existing GasLocation by name/coordinates instead of
+    /// inserting a fresh row per CSV line, matching how manual entry already
+    /// dedupes (see AddFillUpView.resolveLocation) - every importer here used
+    /// to insert unconditionally, which left duplicate "Test Station"-style
+    /// rows that then showed up as literal duplicate entries in the app's
+    /// location-suggestion lists.
+    private func resolveLocation(name: String, latitude: Double, longitude: Double, cache: inout [GasLocation], modelContext: ModelContext) -> GasLocation {
+        if let existing = GasLocation.matching(name: name, latitude: latitude, longitude: longitude, in: cache) {
+            return existing
+        }
+        let loc = GasLocation(name: name, latitude: latitude, longitude: longitude)
+        modelContext.insert(loc)
+        cache.append(loc)
+        return loc
+    }
+
     private func field(_ row: [String], _ index: Int?) -> String {
         guard let index, row.indices.contains(index) else { return "" }
         return row[index]
@@ -145,6 +160,7 @@ class CSVImporter: ObservableObject {
 
         let existingVehicles = (try? modelContext.fetch(FetchDescriptor<Vehicle>())) ?? []
         var vehiclesByName = Dictionary(uniqueKeysWithValues: existingVehicles.map { ($0.name, $0) })
+        var existingLocations = (try? modelContext.fetch(FetchDescriptor<GasLocation>())) ?? []
         let total = Double(max(1, rows.count - 1))
 
         for (index, row) in rows.dropFirst().enumerated() {
@@ -172,9 +188,7 @@ class CSVImporter: ObservableObject {
             let brandName = field(row, brandCol).trimmingCharacters(in: .whitespacesAndNewlines)
             var loc: GasLocation? = nil
             if !brandName.isEmpty {
-                let newLoc = GasLocation(name: brandName, latitude: Double(field(row, latCol)) ?? 0, longitude: Double(field(row, lonCol)) ?? 0)
-                modelContext.insert(newLoc)
-                loc = newLoc
+                loc = resolveLocation(name: brandName, latitude: Double(field(row, latCol)) ?? 0, longitude: Double(field(row, lonCol)) ?? 0, cache: &existingLocations, modelContext: modelContext)
             }
 
             if !(vehicle.fillUps ?? []).contains(where: { abs($0.date.timeIntervalSince(date)) < 60 && $0.volume == vol }) {
@@ -257,6 +271,7 @@ class CSVImporter: ObservableObject {
             modelContext.insert(Trip(name: "Since Day One - \(vehicleName)", startDate: .distantPast, endDate: .distantFuture, vehicle: vehicle))
         }
 
+        var existingLocations = (try? modelContext.fetch(FetchDescriptor<GasLocation>())) ?? []
         let total = Double(max(1, logRows.count))
         for (index, row) in logRows.enumerated() {
             if index % 20 == 0 { importProgress = Double(index) / total; try? await Task.sleep(nanoseconds: 10_000_000) }
@@ -270,9 +285,7 @@ class CSVImporter: ObservableObject {
             let cityName = field(row, cityCol).trimmingCharacters(in: .whitespacesAndNewlines)
             var loc: GasLocation? = nil
             if !cityName.isEmpty {
-                let newLoc = GasLocation(name: cityName, latitude: Double(field(row, latCol)) ?? 0, longitude: Double(field(row, lonCol)) ?? 0)
-                modelContext.insert(newLoc)
-                loc = newLoc
+                loc = resolveLocation(name: cityName, latitude: Double(field(row, latCol)) ?? 0, longitude: Double(field(row, lonCol)) ?? 0, cache: &existingLocations, modelContext: modelContext)
             }
             let notes = field(row, notesCol)
             if !(vehicle.fillUps ?? []).contains(where: { abs($0.date.timeIntervalSince(date)) < 60 && $0.volume == vol }) {
@@ -306,6 +319,7 @@ class CSVImporter: ObservableObject {
             modelContext.insert(Trip(name: "Since Day One - Imported Vehicle", startDate: .distantPast, endDate: .distantFuture, vehicle: vehicle))
         }
 
+        var existingLocations = (try? modelContext.fetch(FetchDescriptor<GasLocation>())) ?? []
         let total = Double(max(1, rows.count - 1))
         for (index, row) in rows.dropFirst().enumerated() {
             if index % 20 == 0 { importProgress = Double(index) / total; try? await Task.sleep(nanoseconds: 10_000_000) }
@@ -321,9 +335,7 @@ class CSVImporter: ObservableObject {
             let stationName = field(row, stationCol).trimmingCharacters(in: .whitespacesAndNewlines)
             var loc: GasLocation? = nil
             if !stationName.isEmpty {
-                let newLoc = GasLocation(name: stationName, latitude: 0, longitude: 0)
-                modelContext.insert(newLoc)
-                loc = newLoc
+                loc = resolveLocation(name: stationName, latitude: 0, longitude: 0, cache: &existingLocations, modelContext: modelContext)
             }
             let notes = field(row, notesCol)
             if !(vehicle.fillUps ?? []).contains(where: { abs($0.date.timeIntervalSince(date)) < 60 && $0.volume == vol }) {
@@ -430,7 +442,8 @@ class CSVImporter: ObservableObject {
         var currentSection = ""
         let existingCategories = (try? modelContext.fetch(FetchDescriptor<TripCategory>())) ?? []
         var categoryMap = Dictionary(uniqueKeysWithValues: existingCategories.map { ($0.name, $0) })
-        
+        var existingLocations = (try? modelContext.fetch(FetchDescriptor<GasLocation>())) ?? []
+
         let totalRows = Double(rows.count)
         
         for i in 0..<rows.count {
@@ -454,17 +467,16 @@ class CSVImporter: ObservableObject {
                 let vol = Double(row[3]) ?? 0
                 let date = parseFlexibleDate(row[2]) ?? Date()
                 let locStr = row.count > 9 ? row[9] : ""
-                let loc = locStr.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : GasLocation(name: locStr, latitude: Double(row.count > 10 ? row[10] : "") ?? 0, longitude: Double(row.count > 11 ? row[11] : "") ?? 0)
-                
+                let loc: GasLocation? = locStr.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : resolveLocation(name: locStr, latitude: Double(row.count > 10 ? row[10] : "") ?? 0, longitude: Double(row.count > 11 ? row[11] : "") ?? 0, cache: &existingLocations, modelContext: modelContext)
+
                 if !(vehicle.fillUps ?? []).contains(where: { abs($0.date.timeIntervalSince(date)) < 60 && $0.volume == vol }) {
-                    if let loc { modelContext.insert(loc) }
                     modelContext.insert(FillUp(date: date, odometer: Double(row[0]), volume: vol, pricePerUnit: Double(row[5]) ?? 0, isFullTank: (row.count > 7 ? row[7] : "") != "1", notes: row.count > 8 ? row[8] : "", unit: vehicle.fuelUnit, vehicle: vehicle, location: loc))
                 }
             } else if currentSection == "MAINT", row.count >= 6 {
                 let cost = Double(row[3]) ?? 0
                 let date = parseFlexibleDate(row[1]) ?? Date()
                 let locStr = row[5]
-                let loc = locStr.isEmpty ? nil : GasLocation(name: locStr, latitude: Double(row.count > 15 ? row[15] : "") ?? 0, longitude: Double(row.count > 16 ? row[16] : "") ?? 0)
+                let loc: GasLocation? = locStr.isEmpty ? nil : resolveLocation(name: locStr, latitude: Double(row.count > 15 ? row[15] : "") ?? 0, longitude: Double(row.count > 16 ? row[16] : "") ?? 0, cache: &existingLocations, modelContext: modelContext)
                 
                 let lowerDesc = row[0].lowercased()
                 let type: ServiceType
@@ -483,7 +495,6 @@ class CSVImporter: ObservableObject {
                 let finalNote = row[4].isEmpty ? row[0] : "\(row[0]) - \(row[4])"
                 
                 if !(vehicle.services ?? []).contains(where: { abs($0.date.timeIntervalSince(date)) < 60 && $0.type == type && $0.cost == cost }) {
-                    if let loc { modelContext.insert(loc) }
                     modelContext.insert(ServiceRecord(date: date, odometer: Double(row[2]) ?? 0, type: type, cost: cost, notes: finalNote, vehicle: vehicle, location: loc))
                 }
             } else if currentSection == "TRIPS", row.count >= 5 {
