@@ -39,7 +39,13 @@ struct LocationPickerView: View {
     
     @State private var searchQuery = ""
     @State private var searchResults: [MKMapItem] = []
-    
+    /// Tracked separately since `MapCameraPosition` doesn't expose its current
+    /// region back out - this is the fallback search bias when the location
+    /// manager's own fix hasn't arrived yet (a fresh CLLocationManager is
+    /// created per picker instance, so early searches would otherwise run
+    /// unbiased and surface generically-prominent results from anywhere).
+    @State private var visibleRegion: MKCoordinateRegion?
+
     var body: some View {
         ZStack(alignment: .top) {
             MapReader { reader in
@@ -47,6 +53,7 @@ struct LocationPickerView: View {
                     if let selectedCoord { Annotation(locationName.isEmpty ? "Selected" : locationName, coordinate: selectedCoord) { Image(systemName: "mappin.circle.fill").font(.title).foregroundStyle(.red).background(Color.white, in: Circle()).shadow(radius: 3) } }
                     if #available(iOS 17.0, macOS 14.0, tvOS 17.0, watchOS 10.0, *) { UserAnnotation() }
                 }
+                .onMapCameraChange { context in visibleRegion = context.region }
                 .onTapGesture(coordinateSpace: .local) { tapPosition in
                     if let pinLocation = reader.convert(tapPosition, from: .local) {
                         selectedCoord = pinLocation; latitude = pinLocation.latitude; longitude = pinLocation.longitude
@@ -125,7 +132,7 @@ struct LocationPickerView: View {
                     if selectedCoord == nil {
                         let request = MKLocalSearch.Request()
                         request.naturalLanguageQuery = locationName
-                        request.region = MKCoordinateRegion(center: loc.coordinate, latitudinalMeters: 50000, longitudinalMeters: 50000)
+                        request.region = MKCoordinateRegion(center: loc.coordinate, latitudinalMeters: 5000, longitudinalMeters: 5000)
                         MKLocalSearch(request: request).start { response, _ in
                             if let first = response?.mapItems.first {
                                 selectSearchResult(first)
@@ -162,7 +169,9 @@ struct LocationPickerView: View {
         let request = MKLocalSearch.Request()
         request.naturalLanguageQuery = searchQuery
         if let loc = locationManager.location {
-            request.region = MKCoordinateRegion(center: loc.coordinate, latitudinalMeters: 50000, longitudinalMeters: 50000)
+            request.region = MKCoordinateRegion(center: loc.coordinate, latitudinalMeters: 5000, longitudinalMeters: 5000)
+        } else if let visibleRegion {
+            request.region = visibleRegion
         }
         let search = MKLocalSearch(request: request)
         search.start { response, error in
