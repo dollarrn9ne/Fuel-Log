@@ -707,6 +707,7 @@ struct DashboardSheetContent: View {
         .sheet(isPresented: $showingAddVehicle) { NavigationStack { AddVehicleView() }.roomySheetOnPad() }
         .sheet(item: $vehicleToEdit) { v in NavigationStack { AddVehicleView(editingVehicle: v) }.roomySheetOnPad() }
         .sheet(isPresented: $showingArchivedVehicles) { ArchivedVehiclesView().roomySheetOnPad() }
+        .sheet(item: $vehicleShareItem) { item in ActivityView(activityItems: [item.url]) }
         .alert("Delete \(vehicle.name)?", isPresented: $showingDeleteConfirmation) { Button("Cancel", role: .cancel) {}; Button("Delete", role: .destructive) { deleteVehicle() } } message: { Text("This will permanently delete this vehicle and all logs.") }
         .sheet(isPresented: $showingMonthlyReport) { NavigationStack { MonthlyReportView(month: monthlyReportMonth, vehicle: vehicle, isModal: true) }.roomySheetOnPad() }
         // A pop-up sheet again rather than a full-screen cover: Settings'
