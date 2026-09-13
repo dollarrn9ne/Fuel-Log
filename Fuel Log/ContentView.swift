@@ -198,7 +198,7 @@ struct ContentView: View {
     /// iPhone, and SwiftUI can't present two sheets from the same hierarchy
     /// at once.
     private func handleQuickAction(_ action: QuickActionManager.QuickAction?) {
-        guard let action else { return }
+        guard action != nil else { return }
         guard unarchivedVehicles.isEmpty else { return }
         // The delay lets the UI settle when the app is launching from a Home
         // Screen quick action or a URL. A menu command arrives with the app

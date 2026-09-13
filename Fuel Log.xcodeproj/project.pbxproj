@@ -65,7 +65,7 @@
 		773D39922F630BD30016115D /* Fuel Log.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Fuel Log.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		77A1D00000000000000000A4 /* Fuel Log Widget.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = "Fuel Log Widget.appex"; sourceTree = BUILT_PRODUCTS_DIR; };
 		77B556372F86D3A400649401 /* Fuel LogUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "Fuel LogUITests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
-		77CC00013015000000649401 /* FuelLogAppClip.app */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = FuelLogAppClip.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		77CC00013015000000649401 /* FuelLogAppClip.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = FuelLogAppClip.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		77FBACFE2F705C6200B2CD00 /* WidgetKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WidgetKit.framework; path = System/Library/Frameworks/WidgetKit.framework; sourceTree = SDKROOT; };
 		77FBAD002F705C6200B2CD00 /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
 /* End PBXFileReference section */
@@ -408,14 +408,18 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_ASSET_PATHS = "";
+				DEVELOPMENT_TEAM = 6LB8V99SS9;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "Fuel Log/Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = "Fuel Log";
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.finance";
 				INFOPLIST_KEY_NSCameraUsageDescription = "Used to scan receipts and extract fuel data locally without leaving your device.";
 				INFOPLIST_KEY_NSFaceIDUsageDescription = "Fuel Log uses Biometrics to keep your logs secure";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "© 2026 Motosung. All rights reserved.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Fuel Log uses your location to find nearby gas stations, service centers and auto-fill previous data pins";
+				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -428,10 +432,11 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 2026.9;
+				MARKETING_VERSION = 2026.8;
 				PRODUCT_BUNDLE_IDENTIFIER = "Motosung.Fuel-Log";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -450,14 +455,18 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_ASSET_PATHS = "";
+				DEVELOPMENT_TEAM = 6LB8V99SS9;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "Fuel Log/Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = "Fuel Log";
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.finance";
 				INFOPLIST_KEY_NSCameraUsageDescription = "Used to scan receipts and extract fuel data locally without leaving your device.";
 				INFOPLIST_KEY_NSFaceIDUsageDescription = "Fuel Log uses Biometrics to keep your logs secure";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "© 2026 Motosung. All rights reserved.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Fuel Log uses your location to find nearby gas stations, service centers and auto-fill previous data pins";
+				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -470,10 +479,11 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 2026.9;
+				MARKETING_VERSION = 2026.8;
 				PRODUCT_BUNDLE_IDENTIFIER = "Motosung.Fuel-Log";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -618,13 +628,14 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "Fuel Log Widget/Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = "Fuel Log Widget";
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				IPHONEOS_DEPLOYMENT_TARGET = 17;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 2026.9;
+				MARKETING_VERSION = 2026.8;
 				PRODUCT_BUNDLE_IDENTIFIER = "Motosung.Fuel-Log.Widget";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
@@ -649,13 +660,14 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "Fuel Log Widget/Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = "Fuel Log Widget";
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				IPHONEOS_DEPLOYMENT_TARGET = 17;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 2026.9;
+				MARKETING_VERSION = 2026.8;
 				PRODUCT_BUNDLE_IDENTIFIER = "Motosung.Fuel-Log.Widget";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
@@ -721,6 +733,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = FuelLogAppClip/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "Fuel Log";
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -731,11 +744,12 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 1.5;
+				MARKETING_VERSION = 2026.8;
 				PRODUCT_BUNDLE_IDENTIFIER = "Motosung.Fuel-Log.AppClip";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
@@ -757,6 +771,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = FuelLogAppClip/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "Fuel Log";
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -767,11 +782,12 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 1.5;
+				MARKETING_VERSION = 2026.8;
 				PRODUCT_BUNDLE_IDENTIFIER = "Motosung.Fuel-Log.AppClip";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
