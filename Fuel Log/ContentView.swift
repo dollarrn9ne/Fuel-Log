@@ -44,7 +44,6 @@ struct ContentView: View {
     @State private var showingAddVehicle = false
     @StateObject private var quickActionManager = QuickActionManager.shared
     @StateObject private var menuCommands = MenuCommandBus.shared
-    @State private var quickActionTarget: QuickActionManager.QuickAction?
     /// Snapshot from a restore that didn't finish, offered back to the user.
     @State private var pendingRecovery: Data?
     @State private var recoveryFailed = false
@@ -116,11 +115,16 @@ struct ContentView: View {
         .animation(.spring(response: 0.6, dampingFraction: 0.9), value: hasSeenSplash)
         .animation(.easeInOut, value: isUnlocked)
         .fontDesign(.rounded)
-        .onAppear { 
+        .onAppear {
             applyTheme(appTheme)
             injectMockDataIfNeeded()
             WidgetSnapshotUpdater.update(from: modelContext, lastSelectedVehicleID: lastSelectedVehicleID)
             handlePendingControlAction()
+            // A cold launch from a Home Screen quick action sets
+            // quickActionManager.action before this view even exists, so the
+            // .onChange below - which only fires on a *transition* - never
+            // sees it. Handle whatever's already sitting there too.
+            handleQuickAction(quickActionManager.action)
         }
         .onChange(of: appTheme) { _, newTheme in applyTheme(newTheme) }
         .onChange(of: scenePhase) { _, newPhase in
@@ -140,12 +144,6 @@ struct ContentView: View {
             WidgetSnapshotUpdater.update(from: modelContext, lastSelectedVehicleID: lastSelectedVehicleID)
         }
         .sheet(isPresented: $showingAddVehicle) { NavigationStack { AddVehicleView() } }
-        .sheet(item: $quickActionTarget) { target in
-            if let vehicle = selectedVehicle {
-                if target == .addFuel { NavigationStack { AddFillUpView(vehicle: vehicle) } }
-                else if target == .addService { NavigationStack { AddServiceView(vehicle: vehicle) } }
-            }
-        }
         // A snapshot still on disk means a restore didn't finish, so offer it back
         // rather than leaving the user to find the file themselves.
         .task { pendingRecovery = FullBackup.pendingSafetyCopy }
@@ -179,18 +177,7 @@ struct ContentView: View {
             menuCommands.consume(command)
         }
         .onChange(of: quickActionManager.action) { _, action in
-            guard let action = action else { return }
-            // The delay lets the UI settle when the app is launching from a Home
-            // Screen quick action or a URL. A menu command arrives with the app
-            // already on screen, where the same wait just feels unresponsive.
-            let delay = quickActionManager.actionIsImmediate ? 0 : 0.5
-            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
-                if action == .addVehicle { showingAddVehicle = true }
-                else if selectedVehicle != nil { quickActionTarget = action }
-                else { showingAddVehicle = true }
-                quickActionManager.action = nil
-                quickActionManager.actionIsImmediate = false
-            }
+            handleQuickAction(action)
         }
         .onOpenURL { url in
             guard url.scheme == "fuellog" else { return }
@@ -201,6 +188,29 @@ struct ContentView: View {
         }
     }
     
+    /// Only handles the empty-garage case, where this view's own
+    /// showingAddVehicle-driven sheet is the sole presentation active and
+    /// safe to trigger. Once a vehicle exists, MainDashboardView is what's on
+    /// screen and it owns a matching handler for its own already-nested
+    /// sheets - this one used to also drive a sheet declared here for that
+    /// case, which silently failed to present because MainDashboardView's
+    /// child (DashboardSheetContent) already has a permanent sheet active on
+    /// iPhone, and SwiftUI can't present two sheets from the same hierarchy
+    /// at once.
+    private func handleQuickAction(_ action: QuickActionManager.QuickAction?) {
+        guard let action else { return }
+        guard unarchivedVehicles.isEmpty else { return }
+        // The delay lets the UI settle when the app is launching from a Home
+        // Screen quick action or a URL. A menu command arrives with the app
+        // already on screen, where the same wait just feels unresponsive.
+        let delay = quickActionManager.actionIsImmediate ? 0 : 0.5
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+            showingAddVehicle = true
+            quickActionManager.action = nil
+            quickActionManager.actionIsImmediate = false
+        }
+    }
+
     /// Picks up a quick action requested by the Log Fuel control (written to the
     /// App Group) and routes it through the existing quick-action presentation.
     private func handlePendingControlAction() {

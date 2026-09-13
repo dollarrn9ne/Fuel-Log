@@ -77,10 +77,10 @@ struct LogFuelIntent: AppIntent {
     var vehicle: VehicleEntity?
 
     @Parameter(title: "Volume")
-    var volume: Double?
+    var volume: Double
 
     @Parameter(title: "Price per Unit")
-    var pricePerUnit: Double?
+    var pricePerUnit: Double
 
     @Parameter(title: "Odometer")
     var odometer: Double?
@@ -110,8 +110,8 @@ struct LogFuelIntent: AppIntent {
 
     @MainActor
     func perform() async throws -> some IntentResult & ReturnsValue<String> {
-        guard let volume = volume, volume > 0 else { throw IntentError.missingVolume }
-        guard let pricePerUnit = pricePerUnit, pricePerUnit >= 0 else { throw IntentError.missingPrice }
+        guard volume > 0 else { throw IntentError.missingVolume }
+        guard pricePerUnit >= 0 else { throw IntentError.missingPrice }
 
         let container = try FuelLogContainer.makeContainer().get()
         let context = container.mainContext

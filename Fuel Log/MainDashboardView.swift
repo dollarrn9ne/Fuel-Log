@@ -47,6 +47,7 @@ struct MainDashboardView: View {
     @StateObject private var locationManager = CurrentLocationManager()
     @State private var isMapReady = false
     @StateObject private var menuCommands = MenuCommandBus.shared
+    @ObservedObject private var quickActionManager = QuickActionManager.shared
     @State private var layoutMode: DashboardLayout = .bottomSheet
     /// Settled height of the portrait card, as a fraction of the screen.
     @State private var cardHeightFraction: CGFloat = 0.34
@@ -346,6 +347,27 @@ struct MainDashboardView: View {
             }
             if let command { menuCommands.consume(command) }
         }
+        // Home Screen quick actions / Siri, once a vehicle exists. ContentView
+        // owns the equivalent handling for the empty-garage case; this view is
+        // only ever on screen when there's a vehicle, and its own sheets are
+        // what actually need to present, so it has to react directly rather
+        // than relying on a handler declared above it in the hierarchy.
+        .onAppear { handleQuickAction(quickActionManager.action) }
+        .onChange(of: quickActionManager.action) { _, action in handleQuickAction(action) }
+        }
+    }
+
+    private func handleQuickAction(_ action: QuickActionManager.QuickAction?) {
+        guard let action else { return }
+        let delay = quickActionManager.actionIsImmediate ? 0 : 0.5
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+            switch action {
+            case .addFuel: showingAddFillUp = true
+            case .addService: showingAddService = true
+            case .addVehicle: showingAddVehicle = true
+            }
+            quickActionManager.action = nil
+            quickActionManager.actionIsImmediate = false
         }
     }
 
