@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		7737FFB9301FD8560063C009 /* FuelLogShared in Frameworks */ = {isa = PBXBuildFile; productRef = 770A3EC83014356E009C9ABC /* FuelLogShared */; };
 		7737FFBA301FD8560063C009 /* FuelLogShared in Frameworks */ = {isa = PBXBuildFile; productRef = 77CC000A3015000000649401 /* FuelLogShared */; };
+		77909FF73058C81E0095D51C /* FuelLogAppClip.app in Embed App Clips */ = {isa = PBXBuildFile; fileRef = 77CC00013015000000649401 /* FuelLogAppClip.app */; };
 		77A1D00000000000000000AB /* FuelLogShared in Frameworks */ = {isa = PBXBuildFile; productRef = 77A1D00000000000000000AA /* FuelLogShared */; };
 		77A1D00000000000000000AC /* Fuel Log Widget.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 77A1D00000000000000000A4 /* Fuel Log Widget.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
@@ -42,8 +43,9 @@
 			isa = PBXCopyFilesBuildPhase;
 			buildActionMask = 2147483647;
 			dstPath = "$(CONTENTS_FOLDER_PATH)/AppClips";
-			dstSubfolderSpec = 0;
+			dstSubfolderSpec = 16;
 			files = (
+				77909FF73058C81E0095D51C /* FuelLogAppClip.app in Embed App Clips */,
 			);
 			name = "Embed App Clips";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -78,6 +80,13 @@
 			);
 			target = 773D39912F630BD30016115D /* Fuel Log */;
 		};
+		77909FF93058CC820095D51C /* PBXFileSystemSynchronizedBuildFileExceptionSet */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Assets.xcassets,
+			);
+			target = 77CC00023015000000649401 /* FuelLogAppClip */;
+		};
 		77A1D00000000000000000A6 /* PBXFileSystemSynchronizedBuildFileExceptionSet */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
@@ -95,7 +104,7 @@
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
-		773D39942F630BD30016115D /* Fuel Log */ = {isa = PBXFileSystemSynchronizedRootGroup; exceptions = (773D399F2F630BD30016115D /* PBXFileSystemSynchronizedBuildFileExceptionSet */, ); explicitFileTypes = {}; explicitFolders = (); path = "Fuel Log"; sourceTree = "<group>"; };
+		773D39942F630BD30016115D /* Fuel Log */ = {isa = PBXFileSystemSynchronizedRootGroup; exceptions = (773D399F2F630BD30016115D /* PBXFileSystemSynchronizedBuildFileExceptionSet */, 77909FF93058CC820095D51C /* PBXFileSystemSynchronizedBuildFileExceptionSet */, ); explicitFileTypes = {}; explicitFolders = (); path = "Fuel Log"; sourceTree = "<group>"; };
 		77A1D00000000000000000A5 /* Fuel Log Widget */ = {isa = PBXFileSystemSynchronizedRootGroup; exceptions = (77A1D00000000000000000A6 /* PBXFileSystemSynchronizedBuildFileExceptionSet */, ); explicitFileTypes = {}; explicitFolders = (); path = "Fuel Log Widget"; sourceTree = "<group>"; };
 		77B556382F86D3A400649401 /* Fuel LogUITests */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = "Fuel LogUITests"; sourceTree = "<group>"; };
 		77CC00093015000000649401 /* FuelLogAppClip */ = {isa = PBXFileSystemSynchronizedRootGroup; exceptions = (77CC00133015000000649401 /* PBXFileSystemSynchronizedBuildFileExceptionSet */, ); explicitFileTypes = {}; explicitFolders = (); path = FuelLogAppClip; sourceTree = "<group>"; };
@@ -405,8 +414,9 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = "Fuel Log/Fuel Log.entitlements";
+				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_ASSET_PATHS = "";
 				DEVELOPMENT_TEAM = 6LB8V99SS9;
 				ENABLE_PREVIEWS = YES;
@@ -433,9 +443,10 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 2026.8;
+				MARKETING_VERSION = 2026.9.17;
 				PRODUCT_BUNDLE_IDENTIFIER = "Motosung.Fuel-Log";
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
@@ -453,8 +464,9 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = "Fuel Log/Fuel Log.entitlements";
+				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_ASSET_PATHS = "";
 				DEVELOPMENT_TEAM = 6LB8V99SS9;
 				ENABLE_PREVIEWS = YES;
@@ -481,9 +493,10 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 2026.8;
+				MARKETING_VERSION = 2026.9.17;
 				PRODUCT_BUNDLE_IDENTIFIER = "Motosung.Fuel-Log";
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
@@ -625,7 +638,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = "Fuel Log Widget/Fuel Log Widget.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "Fuel Log Widget/Info.plist";
@@ -637,7 +650,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 2026.8;
+				MARKETING_VERSION = 2026.9.17;
 				PRODUCT_BUNDLE_IDENTIFIER = "Motosung.Fuel-Log.Widget";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
@@ -657,7 +670,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = "Fuel Log Widget/Fuel Log Widget.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "Fuel Log Widget/Info.plist";
@@ -669,7 +682,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 2026.8;
+				MARKETING_VERSION = 2026.9.17;
 				PRODUCT_BUNDLE_IDENTIFIER = "Motosung.Fuel-Log.Widget";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
@@ -727,10 +740,14 @@
 			buildSettings = {
 				APPCLIP_PARENT_APP_BUNDLE_IDENTIFIER = "Motosung.Fuel-Log";
 				APPLICATION_EXTENSION_API_ONLY = YES;
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
 				CODE_SIGN_ENTITLEMENTS = FuelLogAppClip/FuelLogAppClip.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
+				DEVELOPMENT_TEAM = 6LB8V99SS9;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = FuelLogAppClip/Info.plist;
@@ -741,15 +758,16 @@
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UIRequiresFullScreen = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
-				IPHONEOS_DEPLOYMENT_TARGET = 17;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 2026.8;
+				MARKETING_VERSION = 2026.9.17;
 				PRODUCT_BUNDLE_IDENTIFIER = "Motosung.Fuel-Log.AppClip";
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
 				SKIP_INSTALL = YES;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
@@ -757,7 +775,7 @@
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = 1;
+				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Debug;
 		};
@@ -766,10 +784,14 @@
 			buildSettings = {
 				APPCLIP_PARENT_APP_BUNDLE_IDENTIFIER = "Motosung.Fuel-Log";
 				APPLICATION_EXTENSION_API_ONLY = YES;
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
 				CODE_SIGN_ENTITLEMENTS = FuelLogAppClip/FuelLogAppClip.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
+				DEVELOPMENT_TEAM = 6LB8V99SS9;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = FuelLogAppClip/Info.plist;
@@ -780,15 +802,16 @@
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UIRequiresFullScreen = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
-				IPHONEOS_DEPLOYMENT_TARGET = 17;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 2026.8;
+				MARKETING_VERSION = 2026.9.17;
 				PRODUCT_BUNDLE_IDENTIFIER = "Motosung.Fuel-Log.AppClip";
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
 				SKIP_INSTALL = YES;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
@@ -796,7 +819,7 @@
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = 1;
+				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Release;
 		};
