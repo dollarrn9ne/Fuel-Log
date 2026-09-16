@@ -40,7 +40,7 @@
           "locale" : "en_US"
         }
       ],
-      "productID" : "com.motosung.fuellog.tip10",
+      "productID" : "com.motosung.fuellogv3.tip10",
       "referenceName" : "Tip 10",
       "type" : "Consumable"
     },
@@ -55,7 +55,7 @@
           "locale" : "en_US"
         }
       ],
-      "productID" : "com.motosung.fuellog.tip25",
+      "productID" : "com.motosung.fuellogv3.tip25",
       "referenceName" : "Tip 25",
       "type" : "Consumable"
     },
@@ -70,7 +70,7 @@
           "locale" : "en_US"
         }
       ],
-      "productID" : "com.motosung.fuellog.tip50",
+      "productID" : "com.motosung.fuellogv3.tip50",
       "referenceName" : "Tip 50",
       "type" : "Consumable"
     },
@@ -85,7 +85,7 @@
           "locale" : "en_US"
         }
       ],
-      "productID" : "com.motosung.fuellog.tip100",
+      "productID" : "com.motosung.fuellogv3.tip100",
       "referenceName" : "Tip 100",
       "type" : "Consumable"
     }

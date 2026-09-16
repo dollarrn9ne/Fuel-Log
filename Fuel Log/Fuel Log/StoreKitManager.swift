@@ -7,10 +7,10 @@ import StoreKit
 /// A tip amount offered in the Support Developer menu. Each amount needs its own
 /// App Store product, since in-app purchase prices are fixed per product.
 enum SupportTier: String, CaseIterable, Identifiable {
-    case ten = "com.motosung.fuellog.tip10"
-    case twentyFive = "com.motosung.fuellog.tip25"
-    case fifty = "com.motosung.fuellog.tip50"
-    case oneHundred = "com.motosung.fuellog.tip100"
+    case ten = "com.motosung.fuellogv3.tip10"
+    case twentyFive = "com.motosung.fuellogv3.tip25"
+    case fifty = "com.motosung.fuellogv3.tip50"
+    case oneHundred = "com.motosung.fuellogv3.tip100"
 
     var id: String { rawValue }
 

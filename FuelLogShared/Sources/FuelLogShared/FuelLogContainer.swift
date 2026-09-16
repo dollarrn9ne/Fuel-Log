@@ -16,7 +16,11 @@ public enum FuelLogContainer {
     private static let wipeAttemptKey = "FuelLogContainer.didAttemptWipe"
 
     public static func makeContainer() -> Result<ModelContainer, Error> {
-        let modelConfiguration = ModelConfiguration(schema: sharedSchema, isStoredInMemoryOnly: false)
+        let modelConfiguration = ModelConfiguration(
+            schema: sharedSchema,
+            isStoredInMemoryOnly: false,
+            cloudKitDatabase: .private(SharedLogging.cloudKitContainerIdentifier)
+        )
 
         do {
             let container = try ModelContainer(for: sharedSchema, configurations: [modelConfiguration])
@@ -66,7 +70,7 @@ public enum FuelLogContainer {
         let semaphore = DispatchSemaphore(value: 0)
         var isAvailable = false
 
-        CKContainer.default().accountStatus { status, error in
+        CKContainer(identifier: SharedLogging.cloudKitContainerIdentifier).accountStatus { status, error in
             isAvailable = (status == .available && error == nil)
             semaphore.signal()
         }

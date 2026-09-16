@@ -12,12 +12,33 @@ import CloudKit
 // imports them, and deletes the public record.
 
 public enum SharedLogging {
+    /// The app's CloudKit container. Pinned explicitly rather than relying on
+    /// `CKContainer.default()`/`.automatic`: automatic signing can silently
+    /// reassign which container a target's entitlements resolve to whenever a
+    /// capability is touched in Xcode, independent of what's checked into the
+    /// .entitlements source file. Must match `com.apple.developer.icloud-container-identifiers`
+    /// in both Fuel Log.entitlements and FuelLogAppClip.entitlements exactly.
+    public static let cloudKitContainerIdentifier = "iCloud.com.Motosung.Fuel-Log"
+
     /// CloudKit record type in the public database.
     public static let recordType = "FuelSubmission"
 
     /// The associated domain used for App Clip invocation links.
     public static let linkScheme = "https"
     public static let linkHost = "inputfuellog.app"
+
+    /// App Clips can't write to CloudKit's public database directly (Apple
+    /// restricts `CloudKit-Anonymous` to read-only). Submissions are instead
+    /// relayed through this server endpoint, which writes to CloudKit on the
+    /// App Clip's behalf using a server-to-server key that isn't subject to
+    /// that restriction.
+    public static let relayEndpointURL = URL(string: "https://\(linkHost)/submit")!
+
+    /// Shared secret sent as a header on relay requests. This only raises the
+    /// bar against casual abuse of the public endpoint - anyone who extracts
+    /// it from the compiled App Clip binary can still call the endpoint, but
+    /// it isn't left completely open to the entire internet either.
+    public static let relayClientSecret = "f1cd82eec833361a9097aaad319ef72c0e97b8f23e2ba6cfd5a6b4a175f350ec"
 
     /// Query-item keys used in the share link.
     public enum LinkKey {
@@ -197,10 +218,42 @@ public struct FuelSubmissionPayload: Sendable, Equatable {
     }
 }
 
+// MARK: - Relay JSON Mapping
+
+public extension FuelSubmissionPayload {
+    /// Body for `SharedLogging.relayEndpointURL`. Dates are milliseconds
+    /// since epoch, matching what CloudKit Web Services expects on the
+    /// other end of the relay (see the Worker's `/submit` handler).
+    /// CloudKit's TIMESTAMP fields reject the value if it's serialized as a
+    /// JSON float (e.g. "...000.0"), so this must be a genuine Int64 rather
+    /// than a whole-number Double, which JSONSerialization can still emit
+    /// with a trailing ".0".
+    func makeRelayJSON() -> [String: Any] {
+        var dict: [String: Any] = [
+            "token": token.uuidString,
+            "vehicleID": vehicleID.uuidString,
+            "date": Int64((date.timeIntervalSince1970 * 1000).rounded()),
+            "volume": volume,
+            "pricePerUnit": pricePerUnit,
+            "isFullTank": isFullTank,
+            "unitRaw": unitRaw,
+            "notes": notes,
+            "locationName": locationName,
+            "submittedAt": Int64((submittedAt.timeIntervalSince1970 * 1000).rounded()),
+            "clientSubmissionID": clientSubmissionID
+        ]
+        if let odometer { dict["odometer"] = odometer }
+        return dict
+    }
+}
+
 // MARK: - CloudKit Mapping
 
 public extension FuelSubmissionPayload {
     /// Builds a public-database CKRecord representing this submission.
+    /// Used by the owner's app when re-importing (see SharedLoggingImporter);
+    /// the App Clip itself now goes through `makeRelayJSON()` instead, since
+    /// it can't write to the public database directly.
     func makeRecord() -> CKRecord {
         let record = CKRecord(recordType: SharedLogging.recordType)
         record[SharedLogging.Field.token] = token.uuidString as CKRecordValue

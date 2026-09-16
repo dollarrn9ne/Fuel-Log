@@ -473,8 +473,8 @@ struct SettingsView: View {
     /// don't show a stale sync time alongside a "Not Signed In" status.
     private var isCloudUsable: Bool {
         switch syncManager.status {
-        case .active, .syncing, .checking: return true
-        case .notSignedIn, .restricted, .unavailable, .error: return false
+        case .active, .syncing, .checking, .error: return true
+        case .notSignedIn, .restricted, .unavailable: return false
         }
     }
     

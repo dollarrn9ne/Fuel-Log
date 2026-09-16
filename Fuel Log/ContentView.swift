@@ -47,7 +47,7 @@ struct ContentView: View {
     /// Snapshot from a restore that didn't finish, offered back to the user.
     @State private var pendingRecovery: Data?
     @State private var recoveryFailed = false
-    @State private var isUnlocked: Bool = false
+    @ObservedObject private var lockState = AppLockState.shared
 
     var unarchivedVehicles: [Vehicle] { vehicles.filter { !$0.isArchived } }
     var selectedVehicle: Vehicle? { unarchivedVehicles.first(where: { $0.id.uuidString == lastSelectedVehicleID }) ?? unarchivedVehicles.first }
@@ -84,8 +84,15 @@ struct ContentView: View {
     var body: some View {
         ZStack {
             // Main Dashboard Content
+            //
+            // Deliberately NOT gated on lock state: this content (and any sheet
+            // presented over it, e.g. an in-progress Add Fill-Up form) must stay
+            // mounted while locked so its @State survives backgrounding. Locking
+            // is instead handled by LockOverlayWindow, a separate top-level
+            // UIWindow (see LockScreenView.swift) - it has to outrank any sheet
+            // presented from this hierarchy, which a same-window zIndex can't do.
             Group {
-                if (!appLockEnabled || isUnlocked) && hasSeenSplash {
+                if hasSeenSplash {
                     if unarchivedVehicles.isEmpty {
                         EmptyGarageView(showingAdd: $showingAddVehicle)
                     } else if let vehicle = selectedVehicle {
@@ -104,16 +111,8 @@ struct ContentView: View {
                     .transition(.move(edge: .bottom).combined(with: .opacity))
                     .zIndex(2)
             }
-            
-            // Lock Screen Overlay
-            if appLockEnabled && !isUnlocked {
-                LockScreenView(isUnlocked: $isUnlocked)
-                    .transition(.opacity)
-                    .zIndex(3)
-            }
         }
         .animation(.spring(response: 0.6, dampingFraction: 0.9), value: hasSeenSplash)
-        .animation(.easeInOut, value: isUnlocked)
         .fontDesign(.rounded)
         .onAppear {
             applyTheme(appTheme)
@@ -125,13 +124,15 @@ struct ContentView: View {
             // .onChange below - which only fires on a *transition* - never
             // sees it. Handle whatever's already sitting there too.
             handleQuickAction(quickActionManager.action)
+            updateLockOverlay()
         }
         .onChange(of: appTheme) { _, newTheme in applyTheme(newTheme) }
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .background {
-                if appLockEnabled {
-                    isUnlocked = false
-                }
+                // Deliberately does NOT re-lock here: locking only on a genuine
+                // cold launch (AppLockState.isUnlocked starts false and is only
+                // ever reset by a fresh process) means backgrounding/switching
+                // apps never needs to interrupt an in-progress form.
                 try? modelContext.save()
                 lastSyncDate = Date().timeIntervalSince1970
                 WidgetSnapshotUpdater.update(from: modelContext, lastSelectedVehicleID: lastSelectedVehicleID)
@@ -140,6 +141,8 @@ struct ContentView: View {
                 handlePendingControlAction()
             }
         }
+        .onChange(of: lockState.isUnlocked) { _, _ in updateLockOverlay() }
+        .onChange(of: appLockEnabled) { _, _ in updateLockOverlay() }
         .onChange(of: widgetDataSignature) {
             WidgetSnapshotUpdater.update(from: modelContext, lastSelectedVehicleID: lastSelectedVehicleID)
         }
@@ -208,6 +211,18 @@ struct ContentView: View {
             showingAddVehicle = true
             quickActionManager.action = nil
             quickActionManager.actionIsImmediate = false
+        }
+    }
+
+    /// Shows/hides the lock screen's own top-level window to match current
+    /// lock state. See `LockOverlayWindow` for why this can't just be a view
+    /// in this ZStack: it has to outrank any `.sheet`/`.fullScreenCover`
+    /// presented elsewhere in the app, which a same-window zIndex cannot do.
+    private func updateLockOverlay() {
+        if appLockEnabled && !lockState.isUnlocked {
+            LockOverlayWindow.shared.show()
+        } else {
+            LockOverlayWindow.shared.hide()
         }
     }
 

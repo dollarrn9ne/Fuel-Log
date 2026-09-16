@@ -796,16 +796,16 @@ struct DashboardSheetContent: View {
                     Button(role: .destructive) { showingDeleteConfirmation = true } label: { Label("Delete Vehicle", systemImage: "trash") }
                 }
             } label: {
-                HStack(spacing: 6) {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Text(vehicle.name)
                         .font(.title2.weight(.heavy))
                         .foregroundColor(.primary)
-                        // One line, shrinking only as far as 75% so a long name
-                        // stays close to the surrounding type rather than
-                        // becoming conspicuously small.
-                        .lineLimit(1)
+                        // Up to two lines before shrinking, so a long name wraps
+                        // rather than being clipped mid-word.
+                        .lineLimit(2)
                         .minimumScaleFactor(0.75)
                         .allowsTightening(true)
+                        .multilineTextAlignment(.leading)
                     Image(systemName: "chevron.down").font(.subheadline.weight(.bold)).foregroundColor(.secondary)
                 }
             }

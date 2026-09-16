@@ -11,6 +11,9 @@ import Combine
 import CloudKit
 @preconcurrency import UserNotifications
 import FuelLogShared
+import OSLog
+
+private let sharedImportLog = Logger(subsystem: "com.motosung.fuellog", category: "SharedImport")
 
 // MARK: - Quick Action Handling
 @MainActor
@@ -141,7 +144,7 @@ final class SharedLoggingImporter {
     private init() {}
 
     private var container: ModelContainer?
-    private let database = CKContainer.default().publicCloudDatabase
+    private let database = CKContainer(identifier: SharedLogging.cloudKitContainerIdentifier).publicCloudDatabase
     private let importedIDsKey = "importedSubmissionIDs"
 
     private var sharedDefaults: UserDefaults? {
@@ -180,10 +183,14 @@ final class SharedLoggingImporter {
 
     /// Fetches and imports any pending submissions for the owner's active tokens.
     func importNow() async {
-        guard let container else { return }
+        guard let container else {
+            sharedImportLog.error("importNow: container not configured")
+            return
+        }
         let context = ModelContext(container)
 
         let activeTokens = ((try? context.fetch(FetchDescriptor<ShareToken>())) ?? []).filter { $0.isActive }
+        sharedImportLog.log("importNow: \(activeTokens.count) active token(s)")
         guard !activeTokens.isEmpty else { return }
 
         // Query per token (CloudKit predicate `IN` support is limited).
@@ -191,12 +198,26 @@ final class SharedLoggingImporter {
         for shareToken in activeTokens {
             let predicate = NSPredicate(format: "%K == %@", SharedLogging.Field.token, shareToken.token.uuidString)
             let query = CKQuery(recordType: SharedLogging.recordType, predicate: predicate)
-            guard let response = try? await database.records(matching: query) else { continue }
-            for (recordID, result) in response.matchResults {
-                if case .success(let record) = result { fetched.append((recordID, record)) }
+            do {
+                let response = try await database.records(matching: query)
+                sharedImportLog.log("importNow: token \(shareToken.token.uuidString, privacy: .public) -> \(response.matchResults.count) match(es)")
+                for (recordID, result) in response.matchResults {
+                    switch result {
+                    case .success(let record):
+                        fetched.append((recordID, record))
+                    case .failure(let error):
+                        sharedImportLog.error("importNow: record fetch failed: \(error.localizedDescription, privacy: .public)")
+                    }
+                }
+            } catch {
+                sharedImportLog.error("importNow: query failed for token \(shareToken.token.uuidString, privacy: .public): \(error.localizedDescription, privacy: .public)")
+                continue
             }
         }
-        guard !fetched.isEmpty else { return }
+        guard !fetched.isEmpty else {
+            sharedImportLog.log("importNow: no records fetched, exiting")
+            return
+        }
 
         let vehicles = (try? context.fetch(FetchDescriptor<Vehicle>())) ?? []
         var vehiclesByID: [UUID: Vehicle] = [:]
@@ -207,14 +228,19 @@ final class SharedLoggingImporter {
         var importedVehicleNames: [String] = []
 
         for (recordID, record) in fetched {
-            guard let payload = FuelSubmissionPayload(record: record) else { continue }
+            guard let payload = FuelSubmissionPayload(record: record) else {
+                sharedImportLog.error("importNow: record \(recordID.recordName, privacy: .public) failed to decode into a payload")
+                continue
+            }
 
             if imported.contains(payload.clientSubmissionID) {
+                sharedImportLog.log("importNow: \(payload.clientSubmissionID, privacy: .public) already imported, cleaning up")
                 recordsToDelete.append(recordID) // already imported; just clean up
                 continue
             }
             guard let vehicle = vehiclesByID[payload.vehicleID] else {
                 // Vehicle no longer exists locally; drop the submission.
+                sharedImportLog.error("importNow: no local vehicle for id \(payload.vehicleID.uuidString, privacy: .public), dropping \(payload.clientSubmissionID, privacy: .public)")
                 imported.insert(payload.clientSubmissionID)
                 recordsToDelete.append(recordID)
                 continue
