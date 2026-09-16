@@ -103,7 +103,10 @@ struct AddServiceView: View {
                                     ProgressView()
                                 }
                             }
+                            .padding(.vertical, 6)
+                            .contentShape(Rectangle())
                         }
+                        .buttonStyle(.plain)
                         Divider()
                         PhotosPicker(selection: $receiptPickerItem, matching: .images, photoLibrary: .shared()) {
                             HStack {
@@ -113,7 +116,10 @@ struct AddServiceView: View {
                                     .fontWeight(.semibold)
                                 Spacer()
                             }
+                            .padding(.vertical, 6)
+                            .contentShape(Rectangle())
                         }
+                        .buttonStyle(.plain)
                     }
                     // A drop target for dragging a receipt in from Photos or Files,
                     // on top of the scan and picker buttons - iPad's multitasking

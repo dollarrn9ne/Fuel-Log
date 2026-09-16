@@ -11,6 +11,7 @@ enum FuelFillUpActivityManager {
         do {
             return try Activity.request(attributes: attributes, content: ActivityContent(state: initialState, staleDate: nil), pushType: nil)
         } catch {
+            print("🚨 FuelFillUpActivityManager failed to start Live Activity: \(error)")
             return nil
         }
     }

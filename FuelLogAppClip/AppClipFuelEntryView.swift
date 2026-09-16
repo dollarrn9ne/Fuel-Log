@@ -1,6 +1,5 @@
 import SwiftUI
 import SwiftData
-import CloudKit
 import FuelLogShared
 
 struct AppClipFuelEntryView: View {
@@ -29,6 +28,7 @@ struct AppClipFuelEntryView: View {
 
     @State private var isSubmitting = false
     @State private var submitError: String?
+    @State private var didSubmitShared = false
 
     init(vehicle: Vehicle, prefill: AppClipPrefill? = nil) {
         self.mode = .local(vehicle)
@@ -86,13 +86,38 @@ struct AppClipFuelEntryView: View {
     }
 
     var body: some View {
+        if didSubmitShared {
+            submittedConfirmationView
+        } else {
+            entryForm
+        }
+    }
+
+    private var submittedConfirmationView: some View {
+        ContentUnavailableView {
+            Label("Fill-Up Sent", systemImage: "checkmark.circle.fill")
+        } description: {
+            Text("This fill-up has been sent to the owner's account.")
+        } actions: {
+            Button("Done") { dismiss() }
+                .buttonStyle(.borderedProminent)
+        }
+    }
+
+    private var entryForm: some View {
         Form {
             if case .shared(let descriptor) = mode {
                 Section {
-                    Label("Logging for \(descriptor.name). This fill-up will be sent to the owner.",
-                          systemImage: "person.crop.circle.badge.checkmark")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
+                    Label {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Logging for \(descriptor.name).")
+                            Text("This fill-up will be sent to the owner.")
+                        }
+                    } icon: {
+                        Image(systemName: "person.crop.circle.badge.checkmark")
+                    }
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
                 }
             }
 
@@ -258,15 +283,26 @@ struct AppClipFuelEntryView: View {
         )
         Task {
             do {
-                _ = try await CKContainer.default().publicCloudDatabase.save(payload.makeRecord())
+                var request = URLRequest(url: SharedLogging.relayEndpointURL)
+                request.httpMethod = "POST"
+                request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                request.setValue(SharedLogging.relayClientSecret, forHTTPHeaderField: "X-Fuel-Log-Client-Secret")
+                request.httpBody = try JSONSerialization.data(withJSONObject: payload.makeRelayJSON())
+
+                let (data, response) = try await URLSession.shared.data(for: request)
+                guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+                    let detail = String(data: data, encoding: .utf8) ?? "unknown error"
+                    throw URLError(.badServerResponse, userInfo: [NSLocalizedDescriptionKey: detail])
+                }
+
                 await MainActor.run {
                     isSubmitting = false
-                    dismiss()
+                    didSubmitShared = true
                 }
             } catch {
                 await MainActor.run {
                     isSubmitting = false
-                    submitError = "Your fill-up couldn’t be sent. Make sure you’re signed in to iCloud and connected to the internet, then try again.\n\n(\(error.localizedDescription))"
+                    submitError = "Your fill-up couldn’t be sent. Make sure you’re connected to the internet, then try again.\n\n(\(error.localizedDescription))"
                 }
             }
         }

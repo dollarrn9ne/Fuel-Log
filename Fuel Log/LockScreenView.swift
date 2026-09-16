@@ -47,6 +47,55 @@ extension LAContext {
         }
     }
 }
+// MARK: - App Lock State
+
+/// Shared so the lock overlay window (a separate `UIWindow`, not part of
+/// ContentView's own view hierarchy) can read/write the same unlock state
+/// that scenePhase changes drive.
+@MainActor
+final class AppLockState: ObservableObject {
+    static let shared = AppLockState()
+    @Published var isUnlocked: Bool = false
+}
+
+// MARK: - Lock Overlay Window
+//
+// A `.sheet`/`.fullScreenCover` presented anywhere in the app (e.g. an
+// in-progress Add Fill-Up form) is shown by UIKit as its own modal
+// presentation layered above the *entire* window - no zIndex inside that
+// same window's SwiftUI view hierarchy can appear above it. The lock screen
+// has to actually outrank it, so it's hosted in its own top-level UIWindow
+// instead of a ZStack layer.
+@MainActor
+final class LockOverlayWindow {
+    static let shared = LockOverlayWindow()
+    private var window: UIWindow?
+
+    func show() {
+        guard window == nil else { return }
+        guard let scene = UIApplication.shared.connectedScenes
+            .compactMap({ $0 as? UIWindowScene })
+            .first(where: { $0.activationState == .foregroundActive })
+            ?? UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }).first
+        else { return }
+
+        let overlay = UIWindow(windowScene: scene)
+        overlay.windowLevel = .alert + 1
+        let hosting = UIHostingController(rootView: LockScreenView(isUnlocked: Binding(
+            get: { AppLockState.shared.isUnlocked },
+            set: { AppLockState.shared.isUnlocked = $0 }
+        )))
+        overlay.rootViewController = hosting
+        overlay.makeKeyAndVisible()
+        window = overlay
+    }
+
+    func hide() {
+        window?.isHidden = true
+        window = nil
+    }
+}
+
 // MARK: - Lock Screen View
 struct LockScreenView: View {
     @Binding var isUnlocked: Bool

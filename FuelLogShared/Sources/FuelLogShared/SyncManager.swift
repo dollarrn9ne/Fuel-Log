@@ -87,7 +87,7 @@ public final class SyncManager: ObservableObject {
     /// Checks the iCloud account status. Fast, lightweight.
     public func checkStatus() async {
         status = .checking
-        let container = CKContainer.default()
+        let container = CKContainer(identifier: SharedLogging.cloudKitContainerIdentifier)
 
         do {
             let accountStatus = try await container.accountStatus()
@@ -114,7 +114,7 @@ public final class SyncManager: ObservableObject {
     /// CloudKit container is reachable, then records the last sync time.
     public func forceSync() async {
         status = .syncing
-        let container = CKContainer.default()
+        let container = CKContainer(identifier: SharedLogging.cloudKitContainerIdentifier)
 
         do {
             // fetchUserRecordID proves the container is registered and reachable.
