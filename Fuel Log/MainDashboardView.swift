@@ -103,6 +103,16 @@ struct MainDashboardView: View {
         proxy.size.height + proxy.safeAreaInsets.top + proxy.safeAreaInsets.bottom
     }
 
+    /// The camera/status cluster's frame, in this view's coordinate space, or
+    /// nil when there isn't one to avoid - which is every device before iOS
+    /// 27.1, and any device without an asymmetric occlusion like Duo's
+    /// unfolded inner display, where the cluster sits in a top corner rather
+    /// than the centred island a folded phone has.
+    private func occlusionRegion(_ proxy: GeometryProxy) -> CGRect? {
+        guard #available(iOS 27.1, *) else { return nil }
+        return proxy.reservedRegions(kind: .occlusion).first?.frame
+    }
+
     /// MapKit leaves its own margin above the inset before drawing the Apple Maps
     /// attribution, which left it floating well clear of the sheet. Trimming the
     /// inset by roughly that margin settles it just above the sheet's top edge.
@@ -274,12 +284,20 @@ struct MainDashboardView: View {
                         } label: { Image(systemName: "location.fill").font(.title3).foregroundColor(.primary).padding(12).background(.regularMaterial).clipShape(Circle()).shadow(radius: 2) }
                             .hoverEffect(.highlight)
                     }
-                    .padding()
+                    .padding(.leading, 16)
+                    .padding(.bottom, 16)
+                    // Clears the camera/status cluster rather than a fixed
+                    // amount: on an unfolded Duo it sits in a top corner, not
+                    // the centred island a folded phone has, so the controls
+                    // need to sit below it rather than beside it.
+                    .padding(.top, occlusionRegion(proxy).map { $0.maxY + 8 } ?? 16)
                     // Clears the side panel the same way the map's own trailing
                     // inset does (see FlightPathMap's trailingPadding above):
                     // without it these anchor to the screen's trailing edge,
-                    // which the panel then draws over in landscape.
-                    .padding(.trailing, layout(proxy) == .sidePanel ? Self.panelWidth : 0)
+                    // which the panel then draws over in landscape. Also keeps
+                    // the controls lined up under the camera/status cluster
+                    // rather than just clear of the true screen edge.
+                    .padding(.trailing, (occlusionRegion(proxy).map { max(16, proxy.size.width - $0.maxX) } ?? 16) + (layout(proxy) == .sidePanel ? Self.panelWidth : 0))
                     .opacity(isMapReady ? 1 : 0)
                 }
                 Spacer()
@@ -442,7 +460,13 @@ struct MainDashboardView: View {
         // Clamped to what's actually there as well as to the preferred range: a
         // narrowed iPad window can be slimmer than the 360pt floor, and the card
         // should shrink with it rather than overflow the edges.
-        let available = max(proxy.size.width - Self.bottomCardMargin * 2, 1)
+        //
+        // The right edge is measured against the camera/status cluster when
+        // there is one, not the true screen edge - otherwise the card reads
+        // as running underneath it on an unfolded Duo, where that cluster
+        // sits in a top corner well short of the trailing edge.
+        let rightBoundary = occlusionRegion(proxy).map { $0.minX - Self.bottomCardMargin } ?? (proxy.size.width - Self.bottomCardMargin)
+        let available = max(rightBoundary - Self.bottomCardMargin, 1)
         let preferred = min(max(proxy.size.width * Self.bottomCardWidthFraction, Self.bottomCardMinWidth), Self.bottomCardMaxWidth)
         let width = min(preferred, available)
         return VStack(spacing: 0) {
