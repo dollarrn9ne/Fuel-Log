@@ -443,7 +443,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 2026.9.18;
+				MARKETING_VERSION = 2026.9.19;
 				PRODUCT_BUNDLE_IDENTIFIER = "Motosung.Fuel-Log";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
@@ -493,7 +493,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 2026.9.18;
+				MARKETING_VERSION = 2026.9.19;
 				PRODUCT_BUNDLE_IDENTIFIER = "Motosung.Fuel-Log";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
@@ -650,7 +650,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 2026.9.18;
+				MARKETING_VERSION = 2026.9.19;
 				PRODUCT_BUNDLE_IDENTIFIER = "Motosung.Fuel-Log.Widget";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
@@ -682,7 +682,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 2026.9.18;
+				MARKETING_VERSION = 2026.9.19;
 				PRODUCT_BUNDLE_IDENTIFIER = "Motosung.Fuel-Log.Widget";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
@@ -764,7 +764,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 2026.9.18;
+				MARKETING_VERSION = 2026.9.19;
 				PRODUCT_BUNDLE_IDENTIFIER = "Motosung.Fuel-Log.AppClip";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
@@ -808,7 +808,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 2026.9.18;
+				MARKETING_VERSION = 2026.9.19;
 				PRODUCT_BUNDLE_IDENTIFIER = "Motosung.Fuel-Log.AppClip";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
