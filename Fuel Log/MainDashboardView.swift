@@ -395,17 +395,25 @@ struct MainDashboardView: View {
             DashboardSheetContent(colorScheme: _colorScheme, vehicle: vehicle, allVehicles: allVehicles, events: timelineEvents, onSelectVehicle: onSelectVehicle, newReportMonth: newReportMonth, onAcknowledgeReport: onAcknowledgeReport, selectedLogTab: $selectedLogTab, sheetDetent: $sheetDetent, showingAddFillUp: $showingAddFillUp, fillUpEntryMode: $fillUpEntryMode, showingAddService: $showingAddService, showingTrips: $showingTrips, showingSettings: $showingSettings, showingArchivedVehicles: $showingArchivedVehicles, showingAddVehicle: $showingAddVehicle, showingDeleteConfirmation: $showingDeleteConfirmation, showingCharts: $showingCharts, showingMonthlyReport: $showingMonthlyReport, monthlyReportMonth: $monthlyReportMonth, eventToEdit: $eventToEdit, vehicleToEdit: $vehicleToEdit)
                 .presentationDetents([.fraction(0.35), .fraction(0.65), .large], selection: $sheetDetent)
                 .presentationDragIndicator(.visible).presentationBackgroundInteraction(.enabled(upThrough: .fraction(0.65))).interactiveDismissDisabled()
-                // An inset via .padding() leaves a gap in the canvas
-                // presentationBackground hands back rather than covering it,
-                // and something tied to presentationBackgroundInteraction
-                // fills that gap with its own translucent material - visible
-                // as a ghost seam. Spelling the trailing region out as an
-                // explicit Color.clear, rather than a hole, covers the whole
-                // canvas so nothing else has room to render into it.
+                // panelBackground's glassEffect (iOS 26+) is the actual source
+                // of the translucent "ghost" seen here, not the interaction
+                // modifier above or a padding gap - confirmed by removing
+                // presentationBackgroundInteraction entirely and still seeing
+                // it. Liquid Glass views can visually merge with siblings in
+                // the same container, which is exactly what an HStack sibling
+                // next to a glass Rectangle is. Side-stepped entirely by using
+                // a plain, non-glass fill here instead of panelBackground, and
+                // an explicit width on the shape itself (rather than an HStack
+                // sibling) so there's no adjacent view for anything to merge
+                // with. Rounded on the trailing edge too, matching the card
+                // look bottomPanel(_:) uses for the inner display - previously
+                // this was a plain Rectangle, sharp where it now gets cut off.
                 .presentationBackground {
-                    HStack(spacing: 0) {
-                        panelBackground(in: Rectangle())
-                        Color.clear.frame(width: trailingClusterWidth(proxy))
+                    GeometryReader { bg in
+                        RoundedRectangle(cornerRadius: 28, style: .continuous)
+                            .fill(colorScheme == .dark ? Color(uiColor: .systemBackground).opacity(0.85) : Color(uiColor: .systemGroupedBackground))
+                            .frame(width: max(bg.size.width - trailingClusterWidth(proxy), 1), height: bg.size.height, alignment: .leading)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
         }
