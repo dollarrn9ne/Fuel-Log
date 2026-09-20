@@ -109,10 +109,12 @@ struct MainDashboardView: View {
     /// Closed, Duo's outer display is wider and shorter than a normal
     /// iPhone, and the system moves the status bar, Dynamic Island, and (for
     /// standard nav/tab bars) app controls into a column on the trailing
-    /// edge instead of across the top - Apple's own guidance is that content
-    /// aligned to the horizontal safe area inset offsets around this
-    /// automatically, which is what this reads. Confirmed 84pt on-device via
-    /// debug logging; a regular iPhone reports 0 in portrait.
+    /// edge instead of across the top. That column is reserved *for*
+    /// controls, not reserved *from* them - a system toolbar's close button
+    /// lands centred inside it, not clear of it - so custom floating
+    /// controls that play the same role should move into it too, matching
+    /// where the system puts its own. Confirmed 84pt on-device via debug
+    /// logging; a regular iPhone reports 0 in portrait.
     ///
     /// Regular iPhones can still report a modest leading/trailing inset in
     /// landscape (notch/Dynamic Island avoidance on whichever edge it
@@ -130,6 +132,11 @@ struct MainDashboardView: View {
     /// the on-device screenshot (measured ~154pt tall) rather than a value
     /// read from any API - revisit if that changes.
     private static let trailingClusterHeightEstimate: CGFloat = 165
+
+    /// The map controls' own rendered diameter (title3 icon + 12pt padding),
+    /// used to centre them inside the reserved column rather than clear of
+    /// it. Matches the on-device measurement (~47pt).
+    private static let mapControlButtonDiameter: CGFloat = 47
 
     /// MapKit leaves its own margin above the inset before drawing the Apple Maps
     /// attribution, which left it floating well clear of the sheet. Trimming the
@@ -304,27 +311,26 @@ struct MainDashboardView: View {
                     }
                     .padding(.leading, 16)
                     .padding(.bottom, 16)
-                    // Clears Duo's outer-display control column rather than a
-                    // fixed amount: closed, the status bar/Dynamic Island
+                    // Sits below Duo's outer-display control column rather
+                    // than beside it: closed, the status bar/Dynamic Island
                     // stack vertically down the trailing edge instead of
-                    // sitting centred across the top, so these need to sit
-                    // below that column rather than beside it. Horizontally,
-                    // nothing extra is needed: this HStack is already laid
-                    // out within the safe frame (proxy.size excludes the
-                    // trailing inset), so a plain trailing edge already
-                    // lands flush against the column - see trailingClusterWidth's
-                    // doc comment. Adding the inset again here as *extra*
-                    // padding was the bug in the first attempt at this fix.
+                    // sitting centred across the top.
                     .padding(.top, trailingClusterWidth(proxy) > 0 ? Self.trailingClusterHeightEstimate : 16)
-                    // Clears the side panel the same way the map's own trailing
-                    // inset does (see FlightPathMap's trailingPadding above):
-                    // without it these anchor to the screen's trailing edge,
-                    // which the panel then draws over in landscape.
-                    .padding(.trailing, 16 + (layout(proxy) == .sidePanel ? Self.panelWidth : 0))
+                    // On a normal iPhone/iPad this just clears the true
+                    // trailing edge (or the side panel). On Duo's outer
+                    // display it instead centres these inside the reserved
+                    // column, matching where the system places its own
+                    // toolbar buttons there (see trailingClusterWidth) -
+                    // which needs the HStack below to actually reach that
+                    // column, hence ignoresSafeArea on the trailing edge.
+                    .padding(.trailing, trailingClusterWidth(proxy) > 0
+                        ? max(0, (trailingClusterWidth(proxy) - Self.mapControlButtonDiameter) / 2)
+                        : 16 + (layout(proxy) == .sidePanel ? Self.panelWidth : 0))
                     .opacity(isMapReady ? 1 : 0)
                 }
                 Spacer()
             }
+            .ignoresSafeArea(.container, edges: .trailing)
             .fullScreenCover(isPresented: $showFullScreenMap) { NavigationStack { VehicleMapView(vehicle: vehicle, useSatellite: $useSatellite, selectedTab: selectedLogTab, initialSelection: nil) } }
         }
         .onAppear {
@@ -376,10 +382,17 @@ struct MainDashboardView: View {
             Task { refitMap(containerHeight: fullHeight(proxy), refreshZoom: true) }
         }
         .sheet(isPresented: .constant(layout(proxy) == .bottomSheet)) {
+            // On Duo's outer display the system doesn't narrow this sheet away
+            // from the trailing control column on its own (unlike its top
+            // corners, which it rounds automatically), so the content and its
+            // background are both pulled in by the same amount here - the
+            // same measurement bottomPanel(_:) uses for the inner display's
+            // custom card.
             DashboardSheetContent(colorScheme: _colorScheme, vehicle: vehicle, allVehicles: allVehicles, events: timelineEvents, onSelectVehicle: onSelectVehicle, newReportMonth: newReportMonth, onAcknowledgeReport: onAcknowledgeReport, selectedLogTab: $selectedLogTab, sheetDetent: $sheetDetent, showingAddFillUp: $showingAddFillUp, fillUpEntryMode: $fillUpEntryMode, showingAddService: $showingAddService, showingTrips: $showingTrips, showingSettings: $showingSettings, showingArchivedVehicles: $showingArchivedVehicles, showingAddVehicle: $showingAddVehicle, showingDeleteConfirmation: $showingDeleteConfirmation, showingCharts: $showingCharts, showingMonthlyReport: $showingMonthlyReport, monthlyReportMonth: $monthlyReportMonth, eventToEdit: $eventToEdit, vehicleToEdit: $vehicleToEdit)
+                .padding(.trailing, trailingClusterWidth(proxy))
                 .presentationDetents([.fraction(0.35), .fraction(0.65), .large], selection: $sheetDetent)
                 .presentationDragIndicator(.visible).presentationBackgroundInteraction(.enabled(upThrough: .fraction(0.65))).interactiveDismissDisabled()
-                .presentationBackground { panelBackground(in: Rectangle()) }
+                .presentationBackground { panelBackground(in: Rectangle()).padding(.trailing, trailingClusterWidth(proxy)) }
         }
         .onChange(of: sheetDetent) { _, _ in
             refitMap(containerHeight: fullHeight(proxy))
