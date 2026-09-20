@@ -384,15 +384,30 @@ struct MainDashboardView: View {
         .sheet(isPresented: .constant(layout(proxy) == .bottomSheet)) {
             // On Duo's outer display the system doesn't narrow this sheet away
             // from the trailing control column on its own (unlike its top
-            // corners, which it rounds automatically), so the content and its
-            // background are both pulled in by the same amount here - the
-            // same measurement bottomPanel(_:) uses for the inner display's
-            // custom card.
+            // corners, which it rounds automatically). Only the *background*
+            // is pulled in - not the content itself: the header row (vehicle
+            // name + chevron + the four icon buttons) is already packed
+            // tightly against its own leading-edge padding, and squeezing it
+            // by another 84pt as well collapsed the vehicle name entirely.
+            // The header's icon row is left-aligned and narrow regardless, so
+            // it was never at risk of running under the column; a narrower
+            // background alone is enough.
             DashboardSheetContent(colorScheme: _colorScheme, vehicle: vehicle, allVehicles: allVehicles, events: timelineEvents, onSelectVehicle: onSelectVehicle, newReportMonth: newReportMonth, onAcknowledgeReport: onAcknowledgeReport, selectedLogTab: $selectedLogTab, sheetDetent: $sheetDetent, showingAddFillUp: $showingAddFillUp, fillUpEntryMode: $fillUpEntryMode, showingAddService: $showingAddService, showingTrips: $showingTrips, showingSettings: $showingSettings, showingArchivedVehicles: $showingArchivedVehicles, showingAddVehicle: $showingAddVehicle, showingDeleteConfirmation: $showingDeleteConfirmation, showingCharts: $showingCharts, showingMonthlyReport: $showingMonthlyReport, monthlyReportMonth: $monthlyReportMonth, eventToEdit: $eventToEdit, vehicleToEdit: $vehicleToEdit)
-                .padding(.trailing, trailingClusterWidth(proxy))
                 .presentationDetents([.fraction(0.35), .fraction(0.65), .large], selection: $sheetDetent)
                 .presentationDragIndicator(.visible).presentationBackgroundInteraction(.enabled(upThrough: .fraction(0.65))).interactiveDismissDisabled()
-                .presentationBackground { panelBackground(in: Rectangle()).padding(.trailing, trailingClusterWidth(proxy)) }
+                // An inset via .padding() leaves a gap in the canvas
+                // presentationBackground hands back rather than covering it,
+                // and something tied to presentationBackgroundInteraction
+                // fills that gap with its own translucent material - visible
+                // as a ghost seam. Spelling the trailing region out as an
+                // explicit Color.clear, rather than a hole, covers the whole
+                // canvas so nothing else has room to render into it.
+                .presentationBackground {
+                    HStack(spacing: 0) {
+                        panelBackground(in: Rectangle())
+                        Color.clear.frame(width: trailingClusterWidth(proxy))
+                    }
+                }
         }
         .onChange(of: sheetDetent) { _, _ in
             refitMap(containerHeight: fullHeight(proxy))
