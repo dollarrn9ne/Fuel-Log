@@ -123,6 +123,15 @@ class AppDelegate: NSObject, UIApplicationDelegate {
         configuration.delegateClass = SceneDelegate.self
         return configuration
     }
+
+    /// Portrait-locked on a regular iPhone, but an unfolded Duo reports a
+    /// regular horizontal size class like an iPad, so it's freed to rotate.
+    /// Reads the window's own traits rather than the device idiom, which
+    /// stays `.phone` on Duo whether folded or not.
+    func application(_ application: UIApplication, supportedInterfaceOrientationsFor window: UIWindow?) -> UIInterfaceOrientationMask {
+        guard let window else { return .portrait }
+        return window.traitCollection.horizontalSizeClass == .regular ? .all : .portrait
+    }
 }
 
 class SceneDelegate: UIResponder, UIWindowSceneDelegate {

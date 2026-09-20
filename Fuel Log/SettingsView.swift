@@ -7,6 +7,7 @@ import FuelLogShared
 struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @AppStorage("appTheme") private var appTheme: AppTheme = .system
     @AppStorage("lastSelectedVehicleID") private var lastSelectedVehicleID: String = ""
     @AppStorage("smartRemindersEnabled") private var smartRemindersEnabled: Bool = false
@@ -96,7 +97,7 @@ struct SettingsView: View {
 
     var body: some View {
         Group {
-            if UIDevice.current.userInterfaceIdiom == .pad {
+            if horizontalSizeClass == .regular {
                 padLayout
             } else {
                 phoneLayout
@@ -264,7 +265,7 @@ struct SettingsView: View {
     /// section and repeating it reads as a mistake. iPhone keeps the header,
     /// since there every section shares one screen.
     private func sectionHeader(_ title: String) -> Text {
-        UIDevice.current.userInterfaceIdiom == .pad ? Text("") : Text(title)
+        horizontalSizeClass == .regular ? Text("") : Text(title)
     }
 
     private var closeButton: some ToolbarContent {
