@@ -325,7 +325,16 @@ struct Fuel_LogApp: App {
                     .modelContainer(container)
                     .task {
                         SharedLoggingImporter.shared.configure(container: container)
-                        await SharedLoggingImporter.shared.importNow()
+                        // Background/foreground transitions and push both trigger an
+                        // import, but neither fires while the app is continuously in
+                        // the foreground (e.g. the owner has Settings open the whole
+                        // time a borrower submits). Poll as a fallback so a pending
+                        // submission is never stuck waiting for a transition that may
+                        // never come.
+                        while !Task.isCancelled {
+                            await SharedLoggingImporter.shared.importNow()
+                            try? await Task.sleep(for: .seconds(20))
+                        }
                     }
                     .onChange(of: scenePhase) { _, phase in
                         if phase == .active {
