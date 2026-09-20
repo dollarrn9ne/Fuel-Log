@@ -17,5 +17,7 @@
 	<array>
 		<string>remote-notification</string>
 	</array>
+	<key>UIRequiresFullScreenIgnoredStartingWithVersion</key>
+	<string>26.0</string>
 </dict>
 </plist>

@@ -29,6 +29,7 @@ import FuelLogShared
 // MARK: - Main Dashboard
 struct MainDashboardView: View {
     @Environment(\.colorScheme) var colorScheme
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     let vehicle: Vehicle
     let allVehicles: [Vehicle]
     let onSelectVehicle: (UUID) -> Void
@@ -160,11 +161,16 @@ struct MainDashboardView: View {
     /// narrow iPad window is still an iPad, and the card suits it. The sheet is
     /// kept for iPhone, where its detents are tuned and the shape is right.
     ///
+    /// An unfolded Duo reports a regular horizontal size class while its idiom
+    /// stays `.phone`, so it's let through here too - it lands on the card
+    /// (`.bottomPanel`) below rather than the sheet, same as a compact-width
+    /// iPad window does.
+    ///
     /// The panel-vs-card choice is width, not the aspect ratio it once compared.
     /// Aspect flipped a near-square window on a tiny drag, and near-square is
     /// exactly where windows get parked.
     private func layout(_ proxy: GeometryProxy) -> DashboardLayout {
-        guard UIDevice.current.userInterfaceIdiom == .pad else { return .bottomSheet }
+        guard UIDevice.current.userInterfaceIdiom == .pad || horizontalSizeClass == .regular else { return .bottomSheet }
         // The side panel only ever makes sense with width to spare beside the
         // map, so a portrait-shaped window is always the card - regardless of
         // hysteresis. Without this coarse guard, a 13" iPad's portrait width

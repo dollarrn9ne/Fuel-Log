@@ -33,10 +33,12 @@ struct TripsListView: View {
     @Query private var categories: [TripCategory]
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     @State private var showingAdd = false
     @State private var tripToEdit: Trip?
-    /// Sidebar selection on iPad. Unused on iPhone, which pushes instead.
+    /// Sidebar selection on iPad, and on an unfolded Duo. Unused in a compact
+    /// width, which pushes instead.
     @State private var selectedDestination: TripDestination?
 
     enum TripDestination: Hashable {
@@ -47,7 +49,7 @@ struct TripsListView: View {
 
     var body: some View {
         Group {
-            if UIDevice.current.userInterfaceIdiom == .pad {
+            if horizontalSizeClass == .regular {
                 padLayout
             } else {
                 phoneLayout

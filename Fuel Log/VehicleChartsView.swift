@@ -4,6 +4,7 @@ import FuelLogShared
 
 struct VehicleChartsView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     let vehicle: Vehicle
     
     @State private var timeframe: ChartTimeframe = .sixMonths
@@ -231,11 +232,12 @@ struct VehicleChartsView: View {
         }
     }
 
-    /// Wide enough on an iPad to earn taller charts and a third grid column.
-    /// Excluded on iPhone even in landscape, where those would stretch the
-    /// same handful of tiles thinner rather than looking more considered.
+    /// Wide enough on an iPad, or an unfolded Duo, to earn taller charts and a
+    /// third grid column. Excluded on a compact-width iPhone even in
+    /// landscape, where those would stretch the same handful of tiles thinner
+    /// rather than looking more considered.
     private func isWideLayout(_ proxy: GeometryProxy) -> Bool {
-        UIDevice.current.userInterfaceIdiom == .pad && proxy.size.width > 700
+        horizontalSizeClass == .regular && proxy.size.width > 700
     }
 
     private func isPortrait(_ proxy: GeometryProxy) -> Bool {
