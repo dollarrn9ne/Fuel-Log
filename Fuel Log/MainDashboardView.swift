@@ -138,6 +138,115 @@ struct MainDashboardView: View {
     /// it. Matches the on-device measurement (~47pt).
     private static let mapControlButtonDiameter: CGFloat = 47
 
+    /// True once the rising bottomSheet's top edge has reached the map
+    /// controls' own position, so they'd be silently painted over rather
+    /// than genuinely hidden - confirmed on-device (hierarchy dump: the
+    /// button element is intact and unmoved, the sheet's container frame
+    /// just grew tall enough to overlap it). Only relevant on Duo's outer
+    /// display, where the controls were moved down into the reserved column
+    /// in the first place - a regular iPhone's shorter button stack sits
+    /// well above where even the largest detent's sheet top reaches.
+    private func mapControlsAreCovered(_ proxy: GeometryProxy) -> Bool {
+        guard trailingClusterWidth(proxy) > 0, layout(proxy) == .bottomSheet else { return false }
+        let buttonsBottomY = Self.trailingClusterHeightEstimate + 2 * Self.mapControlButtonDiameter + 12
+        let sheetTopY = fullHeight(proxy) * (1 - sheetFraction)
+        return sheetTopY < buttonsBottomY
+    }
+
+    /// The floating globe/locate buttons over the map, plus the full-screen
+    /// map's own presentation. Split out of `body` as its own function -
+    /// nested inline, this pushed the type checker over its time limit.
+    @ViewBuilder
+    private func mapControlsOverlay(_ proxy: GeometryProxy, covered: Bool) -> some View {
+        VStack {
+            HStack {
+                Spacer()
+                VStack(spacing: 12) {
+                    if colorScheme != .dark {
+                        Button { useSatellite.toggle() } label: { Image(systemName: useSatellite ? "map.fill" : "globe.americas.fill").font(.title3).foregroundColor(.primary).padding(12).background(.regularMaterial).clipShape(Circle()).shadow(radius: 2) }
+                            .hoverEffect(.highlight)
+                    }
+                    Button {
+                        if let loc = locationManager.location { withAnimation(.easeInOut(duration: 0.5)) { mapPosition = .region(MKCoordinateRegion(center: loc.coordinate, latitudinalMeters: 1000, longitudinalMeters: 1000)) } } else {
+                            locationManager.onLocationUpdate = { loc in withAnimation(.easeInOut(duration: 0.5)) { mapPosition = .region(MKCoordinateRegion(center: loc.coordinate, latitudinalMeters: 1000, longitudinalMeters: 1000)) }; locationManager.onLocationUpdate = nil }
+                            locationManager.requestLocation()
+                        }
+                    } label: { Image(systemName: "location.fill").font(.title3).foregroundColor(.primary).padding(12).background(.regularMaterial).clipShape(Circle()).shadow(radius: 2) }
+                        .hoverEffect(.highlight)
+                }
+                .padding(.leading, 16)
+                .padding(.bottom, 16)
+                // Sits below Duo's outer-display control column rather
+                // than beside it: closed, the status bar/Dynamic Island
+                // stack vertically down the trailing edge instead of
+                // sitting centred across the top.
+                .padding(.top, trailingClusterWidth(proxy) > 0 ? Self.trailingClusterHeightEstimate : 16)
+                // On a normal iPhone/iPad this just clears the true
+                // trailing edge (or the side panel). On Duo's outer
+                // display it instead centres these inside the reserved
+                // column, matching where the system places its own
+                // toolbar buttons there (see trailingClusterWidth) -
+                // which needs the HStack below to actually reach that
+                // column, hence ignoresSafeArea on the trailing edge.
+                .padding(.trailing, trailingClusterWidth(proxy) > 0
+                    ? max(0, (trailingClusterWidth(proxy) - Self.mapControlButtonDiameter) / 2)
+                    : 16 + (layout(proxy) == .sidePanel ? Self.panelWidth : 0))
+                // Faded out rather than silently painted over: dragging
+                // the sheet up on Duo's outer display eventually raises
+                // its top edge past these buttons' fixed position (see
+                // mapControlsAreCovered), which otherwise looked like the
+                // location button randomly vanishing.
+                .opacity(isMapReady && !covered ? 1 : 0)
+                .animation(.easeInOut(duration: 0.2), value: covered)
+            }
+            Spacer()
+        }
+        .ignoresSafeArea(.container, edges: .trailing)
+        .fullScreenCover(isPresented: $showFullScreenMap) { NavigationStack { VehicleMapView(vehicle: vehicle, useSatellite: $useSatellite, selectedTab: selectedLogTab, initialSelection: nil) } }
+    }
+
+    /// The permanently-presented bottom sheet used on compact width (a
+    /// regular iPhone, or Duo's outer display). Split out of `body` as its
+    /// own function for the same reason as `mapControlsOverlay` - nested
+    /// inline, this pushed the type checker over its time limit.
+    @ViewBuilder
+    private func bottomSheetContent(_ proxy: GeometryProxy) -> some View {
+        // On Duo's outer display the system doesn't narrow this sheet away
+        // from the trailing control column on its own (unlike its top
+        // corners, which it rounds automatically). Only the *background*
+        // is pulled in - not the content itself: the header row (vehicle
+        // name + chevron + the four icon buttons) is already packed
+        // tightly against its own leading-edge padding, and squeezing it
+        // by another 84pt as well collapsed the vehicle name entirely.
+        // The header's icon row is left-aligned and narrow regardless, so
+        // it was never at risk of running under the column; a narrower
+        // background alone is enough.
+        DashboardSheetContent(colorScheme: _colorScheme, vehicle: vehicle, allVehicles: allVehicles, events: timelineEvents, onSelectVehicle: onSelectVehicle, newReportMonth: newReportMonth, onAcknowledgeReport: onAcknowledgeReport, selectedLogTab: $selectedLogTab, sheetDetent: $sheetDetent, clusterWidth: trailingClusterWidth(proxy), showingAddFillUp: $showingAddFillUp, fillUpEntryMode: $fillUpEntryMode, showingAddService: $showingAddService, showingTrips: $showingTrips, showingSettings: $showingSettings, showingArchivedVehicles: $showingArchivedVehicles, showingAddVehicle: $showingAddVehicle, showingDeleteConfirmation: $showingDeleteConfirmation, showingCharts: $showingCharts, showingMonthlyReport: $showingMonthlyReport, monthlyReportMonth: $monthlyReportMonth, eventToEdit: $eventToEdit, vehicleToEdit: $vehicleToEdit)
+            .presentationDetents([.fraction(0.35), .fraction(0.65), .large], selection: $sheetDetent)
+            .presentationDragIndicator(.visible).presentationBackgroundInteraction(.enabled(upThrough: .fraction(0.65))).interactiveDismissDisabled()
+            // panelBackground's glassEffect (iOS 26+) is the actual source
+            // of the translucent "ghost" seen here, not the interaction
+            // modifier above or a padding gap - confirmed by removing
+            // presentationBackgroundInteraction entirely and still seeing
+            // it. Liquid Glass views can visually merge with siblings in
+            // the same container, which is exactly what an HStack sibling
+            // next to a glass Rectangle is. Side-stepped entirely by using
+            // a plain, non-glass fill here instead of panelBackground, and
+            // an explicit width on the shape itself (rather than an HStack
+            // sibling) so there's no adjacent view for anything to merge
+            // with. Rounded on the trailing edge too, matching the card
+            // look bottomPanel(_:) uses for the inner display - previously
+            // this was a plain Rectangle, sharp where it now gets cut off.
+            .presentationBackground {
+                GeometryReader { bg in
+                    RoundedRectangle(cornerRadius: 28, style: .continuous)
+                        .fill(colorScheme == .dark ? Color(uiColor: .systemBackground).opacity(0.85) : Color(uiColor: .systemGroupedBackground))
+                        .frame(width: max(bg.size.width - trailingClusterWidth(proxy), 1), height: bg.size.height, alignment: .leading)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+    }
+
     /// MapKit leaves its own margin above the inset before drawing the Apple Maps
     /// attribution, which left it floating well clear of the sheet. Trimming the
     /// inset by roughly that margin settles it just above the sheet's top edge.
@@ -256,6 +365,10 @@ struct MainDashboardView: View {
 
     var body: some View {
         GeometryReader { proxy in
+        // Hoisted out of the modifier chain below - repeating this call
+        // inline (once for opacity, once for the animation trigger) is what
+        // pushed the type-checker over its time limit.
+        let mapControlsCovered = mapControlsAreCovered(proxy)
         ZStack(alignment: .top) {
             Color(uiColor: .systemGroupedBackground).ignoresSafeArea()
             if isMapReady {
@@ -293,45 +406,7 @@ struct MainDashboardView: View {
                     .sheet(item: $mapEventToView) { ev in RecordReadOnlyDetailView(event: ev) }
             }
             
-            VStack {
-                HStack {
-                    Spacer()
-                    VStack(spacing: 12) {
-                        if colorScheme != .dark {
-                            Button { useSatellite.toggle() } label: { Image(systemName: useSatellite ? "map.fill" : "globe.americas.fill").font(.title3).foregroundColor(.primary).padding(12).background(.regularMaterial).clipShape(Circle()).shadow(radius: 2) }
-                                .hoverEffect(.highlight)
-                        }
-                        Button {
-                            if let loc = locationManager.location { withAnimation(.easeInOut(duration: 0.5)) { mapPosition = .region(MKCoordinateRegion(center: loc.coordinate, latitudinalMeters: 1000, longitudinalMeters: 1000)) } } else {
-                                locationManager.onLocationUpdate = { loc in withAnimation(.easeInOut(duration: 0.5)) { mapPosition = .region(MKCoordinateRegion(center: loc.coordinate, latitudinalMeters: 1000, longitudinalMeters: 1000)) }; locationManager.onLocationUpdate = nil }
-                                locationManager.requestLocation()
-                            }
-                        } label: { Image(systemName: "location.fill").font(.title3).foregroundColor(.primary).padding(12).background(.regularMaterial).clipShape(Circle()).shadow(radius: 2) }
-                            .hoverEffect(.highlight)
-                    }
-                    .padding(.leading, 16)
-                    .padding(.bottom, 16)
-                    // Sits below Duo's outer-display control column rather
-                    // than beside it: closed, the status bar/Dynamic Island
-                    // stack vertically down the trailing edge instead of
-                    // sitting centred across the top.
-                    .padding(.top, trailingClusterWidth(proxy) > 0 ? Self.trailingClusterHeightEstimate : 16)
-                    // On a normal iPhone/iPad this just clears the true
-                    // trailing edge (or the side panel). On Duo's outer
-                    // display it instead centres these inside the reserved
-                    // column, matching where the system places its own
-                    // toolbar buttons there (see trailingClusterWidth) -
-                    // which needs the HStack below to actually reach that
-                    // column, hence ignoresSafeArea on the trailing edge.
-                    .padding(.trailing, trailingClusterWidth(proxy) > 0
-                        ? max(0, (trailingClusterWidth(proxy) - Self.mapControlButtonDiameter) / 2)
-                        : 16 + (layout(proxy) == .sidePanel ? Self.panelWidth : 0))
-                    .opacity(isMapReady ? 1 : 0)
-                }
-                Spacer()
-            }
-            .ignoresSafeArea(.container, edges: .trailing)
-            .fullScreenCover(isPresented: $showFullScreenMap) { NavigationStack { VehicleMapView(vehicle: vehicle, useSatellite: $useSatellite, selectedTab: selectedLogTab, initialSelection: nil) } }
+            mapControlsOverlay(proxy, covered: mapControlsCovered)
         }
         .onAppear {
             locationManager.requestLocation()
@@ -382,40 +457,7 @@ struct MainDashboardView: View {
             Task { refitMap(containerHeight: fullHeight(proxy), refreshZoom: true) }
         }
         .sheet(isPresented: .constant(layout(proxy) == .bottomSheet)) {
-            // On Duo's outer display the system doesn't narrow this sheet away
-            // from the trailing control column on its own (unlike its top
-            // corners, which it rounds automatically). Only the *background*
-            // is pulled in - not the content itself: the header row (vehicle
-            // name + chevron + the four icon buttons) is already packed
-            // tightly against its own leading-edge padding, and squeezing it
-            // by another 84pt as well collapsed the vehicle name entirely.
-            // The header's icon row is left-aligned and narrow regardless, so
-            // it was never at risk of running under the column; a narrower
-            // background alone is enough.
-            DashboardSheetContent(colorScheme: _colorScheme, vehicle: vehicle, allVehicles: allVehicles, events: timelineEvents, onSelectVehicle: onSelectVehicle, newReportMonth: newReportMonth, onAcknowledgeReport: onAcknowledgeReport, selectedLogTab: $selectedLogTab, sheetDetent: $sheetDetent, showingAddFillUp: $showingAddFillUp, fillUpEntryMode: $fillUpEntryMode, showingAddService: $showingAddService, showingTrips: $showingTrips, showingSettings: $showingSettings, showingArchivedVehicles: $showingArchivedVehicles, showingAddVehicle: $showingAddVehicle, showingDeleteConfirmation: $showingDeleteConfirmation, showingCharts: $showingCharts, showingMonthlyReport: $showingMonthlyReport, monthlyReportMonth: $monthlyReportMonth, eventToEdit: $eventToEdit, vehicleToEdit: $vehicleToEdit)
-                .presentationDetents([.fraction(0.35), .fraction(0.65), .large], selection: $sheetDetent)
-                .presentationDragIndicator(.visible).presentationBackgroundInteraction(.enabled(upThrough: .fraction(0.65))).interactiveDismissDisabled()
-                // panelBackground's glassEffect (iOS 26+) is the actual source
-                // of the translucent "ghost" seen here, not the interaction
-                // modifier above or a padding gap - confirmed by removing
-                // presentationBackgroundInteraction entirely and still seeing
-                // it. Liquid Glass views can visually merge with siblings in
-                // the same container, which is exactly what an HStack sibling
-                // next to a glass Rectangle is. Side-stepped entirely by using
-                // a plain, non-glass fill here instead of panelBackground, and
-                // an explicit width on the shape itself (rather than an HStack
-                // sibling) so there's no adjacent view for anything to merge
-                // with. Rounded on the trailing edge too, matching the card
-                // look bottomPanel(_:) uses for the inner display - previously
-                // this was a plain Rectangle, sharp where it now gets cut off.
-                .presentationBackground {
-                    GeometryReader { bg in
-                        RoundedRectangle(cornerRadius: 28, style: .continuous)
-                            .fill(colorScheme == .dark ? Color(uiColor: .systemBackground).opacity(0.85) : Color(uiColor: .systemGroupedBackground))
-                            .frame(width: max(bg.size.width - trailingClusterWidth(proxy), 1), height: bg.size.height, alignment: .leading)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                }
+            bottomSheetContent(proxy)
         }
         .onChange(of: sheetDetent) { _, _ in
             refitMap(containerHeight: fullHeight(proxy))
@@ -724,6 +766,11 @@ struct DashboardSheetContent: View {
     let onAcknowledgeReport: () -> Void
     @Binding var selectedLogTab: LogTabChoice
     @Binding var sheetDetent: PresentationDetent
+    /// Width of Duo's outer-display reserved control column, or 0 elsewhere
+    /// - see MainDashboardView.trailingClusterWidth(_:). Threaded in rather
+    /// than measured locally, since the parent already has to compute it for
+    /// the map controls and the card's own width.
+    var clusterWidth: CGFloat = 0
 
     /// Owned by MainDashboardView, not here: this view is rebuilt from scratch
     /// whenever an iPad rotation crosses the side-panel/bottom-panel width
@@ -857,8 +904,40 @@ struct DashboardSheetContent: View {
         }
     }
 
+    /// Below the status column's bottom edge when the pill is fully up
+    /// (sheetDetent == .large): calibrated the same way as
+    /// MainDashboardView.trailingClusterHeightEstimate (that one's in screen
+    /// coordinates; this is the same measurement translated into this
+    /// header's own local coordinate space, after the sheet's ~8pt top
+    /// inset at that detent and this header's own 24pt top padding).
+    private static let expandedIconRowTopInset: CGFloat = 130
+
     private var headerBar: some View {
-        HStack(spacing: 16) {
+        Group {
+            if clusterWidth > 0 && sheetDetent == .large {
+                // Fully expanded, the header sits near the true top of the
+                // screen, level with Duo's outer-display status column - the
+                // icon row moves into a column on the right below it, the
+                // same way the map's own floating controls do, rather than
+                // competing with the vehicle name for a cramped inline row.
+                ZStack(alignment: .topTrailing) {
+                    vehicleMenuLabel
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    quickIconRow
+                        .padding(.top, Self.expandedIconRowTopInset)
+                }
+            } else {
+                HStack(spacing: 16) {
+                    vehicleMenuLabel
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    quickIconRow
+                }
+            }
+        }
+        .padding(.horizontal, 24).padding(.top, 24).padding(.bottom, 16)
+    }
+
+    private var vehicleMenuLabel: some View {
             // A system Menu rather than a hand-rolled overlay: it renders outside
             // the sheet, so it needs no room made for it and can't be caught up
             // in the sheet's own animation, which is what made the old one
@@ -901,8 +980,9 @@ struct DashboardSheetContent: View {
             // system menu rows and may ignore this; if the menu still renders in
             // the default face, that's the platform's call, not a missing setting.
             .fontDesign(.rounded)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            
+    }
+
+    private var quickIconRow: some View {
             HStack(spacing: 12) {
                 Button { showingAddVehicle = true } label: { Image(systemName: "plus").font(.system(size: 20, weight: .semibold)).foregroundColor(.primary).frame(width: 44, height: 44).background(Color(uiColor: .tertiarySystemFill), in: Circle()) }
                     .hoverEffect(.highlight)
@@ -934,7 +1014,6 @@ struct DashboardSheetContent: View {
                 Button { showingSettings = true } label: { Image(systemName: "gearshape.fill").font(.system(size: 20)).foregroundColor(.primary).frame(width: 44, height: 44).background(Color(uiColor: .tertiarySystemFill), in: Circle()) }
                     .hoverEffect(.highlight)
             }
-        }.padding(.horizontal, 24).padding(.top, 24).padding(.bottom, 16)
     }
     
     /// Creates a "share for logging" link for the current vehicle and presents
