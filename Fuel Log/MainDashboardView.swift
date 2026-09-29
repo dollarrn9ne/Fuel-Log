@@ -30,6 +30,7 @@ import FuelLogShared
 struct MainDashboardView: View {
     @Environment(\.colorScheme) var colorScheme
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.modelContext) private var modelContext
     let vehicle: Vehicle
     let allVehicles: [Vehicle]
     let onSelectVehicle: (UUID) -> Void
@@ -138,26 +139,29 @@ struct MainDashboardView: View {
     /// it. Matches the on-device measurement (~47pt).
     private static let mapControlButtonDiameter: CGFloat = 47
 
-    /// True once the rising bottomSheet's top edge has reached the map
-    /// controls' own position, so they'd be silently painted over rather
-    /// than genuinely hidden - confirmed on-device (hierarchy dump: the
-    /// button element is intact and unmoved, the sheet's container frame
-    /// just grew tall enough to overlap it). Only relevant on Duo's outer
-    /// display, where the controls were moved down into the reserved column
-    /// in the first place - a regular iPhone's shorter button stack sits
-    /// well above where even the largest detent's sheet top reaches.
-    private func mapControlsAreCovered(_ proxy: GeometryProxy) -> Bool {
-        guard trailingClusterWidth(proxy) > 0, layout(proxy) == .bottomSheet else { return false }
-        let buttonsBottomY = Self.trailingClusterHeightEstimate + 2 * Self.mapControlButtonDiameter + 12
-        let sheetTopY = fullHeight(proxy) * (1 - sheetFraction)
-        return sheetTopY < buttonsBottomY
-    }
-
-    /// The floating globe/locate buttons over the map, plus the full-screen
+    /// The floating globe/locate buttons over the map, and the full-screen
     /// map's own presentation. Split out of `body` as its own function -
     /// nested inline, this pushed the type checker over its time limit.
+    ///
+    /// The plus/map/share/gear icons (see DashboardSheetContent.relocatedIconRow)
+    /// are NOT drawn here even though they visually join this same column:
+    /// a sheet's presentation always renders above its presenter, and
+    /// confirmed on-device that presentationBackgroundInteraction doesn't
+    /// reliably forward taps to specific buttons underneath it. They have
+    /// to live inside the sheet itself to stay tappable; see
+    /// relocatedIconsTopPadding(_:) for how they still land in this same
+    /// column without being nested in this view.
+    ///
+    /// A NavigationStack + .toolbar{} version of this was tried instead,
+    /// hoping the system would place the icons automatically the way
+    /// Settings' close button does - it did relocate them vertically, but
+    /// tied to wherever *this view's own* trailing edge was, not the true
+    /// hardware column (confirmed on-device: they landed inside the pill's
+    /// own bounds, not lined up with the status icons). Reverted - untying
+    /// their position from the pill's width needs the manual
+    /// ignoresSafeArea approach below.
     @ViewBuilder
-    private func mapControlsOverlay(_ proxy: GeometryProxy, covered: Bool) -> some View {
+    private func mapControlsOverlay(_ proxy: GeometryProxy) -> some View {
         VStack {
             HStack {
                 Spacer()
@@ -191,13 +195,7 @@ struct MainDashboardView: View {
                 .padding(.trailing, trailingClusterWidth(proxy) > 0
                     ? max(0, (trailingClusterWidth(proxy) - Self.mapControlButtonDiameter) / 2)
                     : 16 + (layout(proxy) == .sidePanel ? Self.panelWidth : 0))
-                // Faded out rather than silently painted over: dragging
-                // the sheet up on Duo's outer display eventually raises
-                // its top edge past these buttons' fixed position (see
-                // mapControlsAreCovered), which otherwise looked like the
-                // location button randomly vanishing.
-                .opacity(isMapReady && !covered ? 1 : 0)
-                .animation(.easeInOut(duration: 0.2), value: covered)
+                .opacity(isMapReady ? 1 : 0)
             }
             Spacer()
         }
@@ -205,46 +203,53 @@ struct MainDashboardView: View {
         .fullScreenCover(isPresented: $showFullScreenMap) { NavigationStack { VehicleMapView(vehicle: vehicle, useSatellite: $useSatellite, selectedTab: selectedLogTab, initialSelection: nil) } }
     }
 
+    /// The top padding DashboardSheetContent's relocatedIconRow needs, in
+    /// its own local coordinate space, to land its icons at the same
+    /// absolute screen position regardless of which detent moved the
+    /// sheet's own top edge. That view's content is positioned relative to
+    /// its own top, which is a different absolute screen position at each
+    /// detent (measured on-device: ~413pt at the small detent, ~223pt at
+    /// medium, ~8pt at large) - a fixed padding value only ever looked
+    /// right at whichever one detent it was tuned against.
+    private func relocatedIconsTopPadding(_ proxy: GeometryProxy) -> CGFloat {
+        // sheetFraction is a hand-tuned approximation (0.35/0.65/0.92), not
+        // measured - confirmed on-device at the medium detent that it's off
+        // from the sheet's real rendered top by ~15pt, which without this
+        // margin let the icons land 15pt too high, overlapping the
+        // location button above them. 20pt covers that plus a bit of
+        // breathing room, rather than chasing sheetFraction's exact value
+        // (it's shared with the map-panning maths elsewhere, where that
+        // approximation is fine, so it's not being tightened just for this).
+        let clearanceMargin: CGFloat = 20
+        let targetScreenY = Self.trailingClusterHeightEstimate + 2 * Self.mapControlButtonDiameter + 12 + clearanceMargin
+        let sheetTopY = fullHeight(proxy) * (1 - sheetFraction)
+        return max(0, targetScreenY - sheetTopY)
+    }
+
     /// The permanently-presented bottom sheet used on compact width (a
     /// regular iPhone, or Duo's outer display). Split out of `body` as its
     /// own function for the same reason as `mapControlsOverlay` - nested
     /// inline, this pushed the type checker over its time limit.
+    ///
+    /// Reverted to the plain full-width pill from before any Duo-specific
+    /// narrowing: every attempt to cap this sheet's width to clear the
+    /// reserved column (a fixed pixel value, then 80% of the full width)
+    /// surfaced a translucent "haze" artifact in the gap that survived four
+    /// distinct fix attempts (an unfilled canvas gap, an explicit
+    /// Color.clear sibling, dropping panelBackground's glassEffect for a
+    /// plain fill, and nullifying the sheet's default background outright
+    /// via presentationBackground(.clear) combined with an ordinary
+    /// .background() on the content) - each ruled out the specific
+    /// mechanism it targeted without ever finding the real cause. Not
+    /// worth further cycles right now; the icons that need to clear the
+    /// column live in relocatedIconRow instead, positioned independently
+    /// of whatever width this pill has.
     @ViewBuilder
     private func bottomSheetContent(_ proxy: GeometryProxy) -> some View {
-        // On Duo's outer display the system doesn't narrow this sheet away
-        // from the trailing control column on its own (unlike its top
-        // corners, which it rounds automatically). Only the *background*
-        // is pulled in - not the content itself: the header row (vehicle
-        // name + chevron + the four icon buttons) is already packed
-        // tightly against its own leading-edge padding, and squeezing it
-        // by another 84pt as well collapsed the vehicle name entirely.
-        // The header's icon row is left-aligned and narrow regardless, so
-        // it was never at risk of running under the column; a narrower
-        // background alone is enough.
-        DashboardSheetContent(colorScheme: _colorScheme, vehicle: vehicle, allVehicles: allVehicles, events: timelineEvents, onSelectVehicle: onSelectVehicle, newReportMonth: newReportMonth, onAcknowledgeReport: onAcknowledgeReport, selectedLogTab: $selectedLogTab, sheetDetent: $sheetDetent, clusterWidth: trailingClusterWidth(proxy), showingAddFillUp: $showingAddFillUp, fillUpEntryMode: $fillUpEntryMode, showingAddService: $showingAddService, showingTrips: $showingTrips, showingSettings: $showingSettings, showingArchivedVehicles: $showingArchivedVehicles, showingAddVehicle: $showingAddVehicle, showingDeleteConfirmation: $showingDeleteConfirmation, showingCharts: $showingCharts, showingMonthlyReport: $showingMonthlyReport, monthlyReportMonth: $monthlyReportMonth, eventToEdit: $eventToEdit, vehicleToEdit: $vehicleToEdit)
+        DashboardSheetContent(colorScheme: _colorScheme, vehicle: vehicle, allVehicles: allVehicles, events: timelineEvents, onSelectVehicle: onSelectVehicle, newReportMonth: newReportMonth, onAcknowledgeReport: onAcknowledgeReport, selectedLogTab: $selectedLogTab, sheetDetent: $sheetDetent, clusterWidth: trailingClusterWidth(proxy), relocatedIconsTopPadding: relocatedIconsTopPadding(proxy), showingAddFillUp: $showingAddFillUp, fillUpEntryMode: $fillUpEntryMode, showingAddService: $showingAddService, showingTrips: $showingTrips, showingSettings: $showingSettings, showingArchivedVehicles: $showingArchivedVehicles, showingAddVehicle: $showingAddVehicle, showingDeleteConfirmation: $showingDeleteConfirmation, showingCharts: $showingCharts, showingMonthlyReport: $showingMonthlyReport, monthlyReportMonth: $monthlyReportMonth, eventToEdit: $eventToEdit, vehicleToEdit: $vehicleToEdit)
             .presentationDetents([.fraction(0.35), .fraction(0.65), .large], selection: $sheetDetent)
             .presentationDragIndicator(.visible).presentationBackgroundInteraction(.enabled(upThrough: .fraction(0.65))).interactiveDismissDisabled()
-            // panelBackground's glassEffect (iOS 26+) is the actual source
-            // of the translucent "ghost" seen here, not the interaction
-            // modifier above or a padding gap - confirmed by removing
-            // presentationBackgroundInteraction entirely and still seeing
-            // it. Liquid Glass views can visually merge with siblings in
-            // the same container, which is exactly what an HStack sibling
-            // next to a glass Rectangle is. Side-stepped entirely by using
-            // a plain, non-glass fill here instead of panelBackground, and
-            // an explicit width on the shape itself (rather than an HStack
-            // sibling) so there's no adjacent view for anything to merge
-            // with. Rounded on the trailing edge too, matching the card
-            // look bottomPanel(_:) uses for the inner display - previously
-            // this was a plain Rectangle, sharp where it now gets cut off.
-            .presentationBackground {
-                GeometryReader { bg in
-                    RoundedRectangle(cornerRadius: 28, style: .continuous)
-                        .fill(colorScheme == .dark ? Color(uiColor: .systemBackground).opacity(0.85) : Color(uiColor: .systemGroupedBackground))
-                        .frame(width: max(bg.size.width - trailingClusterWidth(proxy), 1), height: bg.size.height, alignment: .leading)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-            }
+            .presentationBackground { panelBackground(in: Rectangle()) }
     }
 
     /// MapKit leaves its own margin above the inset before drawing the Apple Maps
@@ -365,10 +370,6 @@ struct MainDashboardView: View {
 
     var body: some View {
         GeometryReader { proxy in
-        // Hoisted out of the modifier chain below - repeating this call
-        // inline (once for opacity, once for the animation trigger) is what
-        // pushed the type-checker over its time limit.
-        let mapControlsCovered = mapControlsAreCovered(proxy)
         ZStack(alignment: .top) {
             Color(uiColor: .systemGroupedBackground).ignoresSafeArea()
             if isMapReady {
@@ -406,7 +407,7 @@ struct MainDashboardView: View {
                     .sheet(item: $mapEventToView) { ev in RecordReadOnlyDetailView(event: ev) }
             }
             
-            mapControlsOverlay(proxy, covered: mapControlsCovered)
+            mapControlsOverlay(proxy)
         }
         .onAppear {
             locationManager.requestLocation()
@@ -771,6 +772,13 @@ struct DashboardSheetContent: View {
     /// than measured locally, since the parent already has to compute it for
     /// the map controls and the card's own width.
     var clusterWidth: CGFloat = 0
+    /// Top padding relocatedIconRow needs, in this view's own local
+    /// coordinate space, to land at the same absolute screen position
+    /// regardless of detent - see MainDashboardView.relocatedIconsTopPadding(_:),
+    /// which computes it. Not measured locally: this view's coordinate
+    /// space moves with the sheet's own top edge as the detent changes, so
+    /// it has no way to know where the true screen top is on its own.
+    var relocatedIconsTopPadding: CGFloat = 0
 
     /// Owned by MainDashboardView, not here: this view is rebuilt from scratch
     /// whenever an iPad rotation crosses the side-panel/bottom-panel width
@@ -795,14 +803,31 @@ struct DashboardSheetContent: View {
     @StateObject private var sheetMenuCommands = MenuCommandBus.shared
 
     var body: some View {
+        // relocatedIconRow is a sibling of the VStack below, not nested
+        // inside it via .overlay() on that view - an overlay's content is
+        // proposed the base view's own resolved size, which is exactly what
+        // this row needs to reach past to get into the reserved column. As
+        // a ZStack sibling instead, it's proposed this whole body's width,
+        // which is never explicitly capped, so ignoresSafeArea inside it
+        // has actual room to work with.
+        ZStack(alignment: .topTrailing) {
         VStack(spacing: 0) {
             headerBar
+            // Reserves room for relocatedIconRow, which floats on top as a
+            // separate ZStack layer rather than sitting inline in the
+            // header. Without this, removing the icon row from the header
+            // left it shorter, so the scroll content below started sooner
+            // and rendered directly underneath (visually behind) the
+            // floated row instead of clear of it.
+            if iconRowIsRelocated {
+                Color.clear.frame(height: relocatedIconsTopPadding + Self.relocatedIconRowHeight)
+            }
             ScrollView {
                 VStack(spacing: 0) {
                     FlightyStatsGrid(vehicle: vehicle, selectedTab: selectedLogTab).padding(.horizontal, 24).padding(.bottom, 24)
                     quickActionButtons
                     if vehicle.isMaintenanceDue { MaintenanceAlertView(vehicle: vehicle).padding(.horizontal, 24).padding(.bottom, 16) }
-                    
+
                     if !(vehicle.fillUps?.isEmpty ?? true) || !(vehicle.services?.isEmpty ?? true) {
                         Button {
                             showingCharts = true
@@ -827,12 +852,12 @@ struct DashboardSheetContent: View {
                         .padding(.horizontal, 24)
                         .padding(.bottom, 24)
                     }
-                    
+
                     Picker("Log View", selection: $selectedLogTab) { ForEach(LogTabChoice.allCases) { tab in Text(tab.rawValue).tag(tab) } }
                         .pickerStyle(.segmented)
                         .padding(.horizontal, 24)
                         .padding(.bottom, 16)
-                    
+
                     HStack {
                         Image(systemName: "magnifyingglass").foregroundColor(.secondary)
                         TextField("Search name, date, mileage...", text: $searchText)
@@ -841,10 +866,13 @@ struct DashboardSheetContent: View {
                     .applyLiquidGlassOrBackground(cornerRadius: 12, fallbackColor: .tertiarySystemGroupedBackground)
                     .padding(.horizontal, 24)
                     .padding(.bottom, 16)
-                    
+
                     logViewArea
                 }
             }
+        }
+
+        relocatedIconRow
         }
         // Presentations for this content's own actions. Nested here rather
         // than on MainDashboardView: on iPhone this view is itself always
@@ -904,34 +932,69 @@ struct DashboardSheetContent: View {
         }
     }
 
-    /// Below the status column's bottom edge when the pill is fully up
-    /// (sheetDetent == .large): calibrated the same way as
-    /// MainDashboardView.trailingClusterHeightEstimate (that one's in screen
-    /// coordinates; this is the same measurement translated into this
-    /// header's own local coordinate space, after the sheet's ~8pt top
-    /// inset at that detent and this header's own 24pt top padding).
-    private static let expandedIconRowTopInset: CGFloat = 130
+    /// True whenever the pill isn't at its smallest detent on Duo's outer
+    /// display - the icon row relocates into the reserved column below the
+    /// status icons at that point (see relocatedIconRow below), rather than
+    /// sitting inline in the header.
+    private var iconRowIsRelocated: Bool { clusterWidth > 0 && sheetDetent != .fraction(0.35) }
+
+    /// Total height of the relocated row: 4 buttons at 44pt plus 3 gaps at
+    /// 12pt (matches quickIconRow's own spacing). Used to reserve room for
+    /// it below the header - see body's Color.clear spacer.
+    private static let relocatedIconRowHeight: CGFloat = 4 * 44 + 3 * 12
+
+    /// The icon row when the pill isn't at its smallest detent, relocated
+    /// into Duo's outer-display reserved column - same technique
+    /// MainDashboardView uses for the map's own floating buttons
+    /// (ignoresSafeArea, reaching past this view's own bounds via the
+    /// ZStack sibling in body). Rendered here, inside the sheet's own
+    /// content, rather than by MainDashboardView alongside the globe/locate
+    /// buttons: confirmed on-device that a copy drawn in the *presenter*
+    /// looked right but did nothing when tapped - a sheet's presentation
+    /// always renders above its presenter. Living inside the sheet keeps
+    /// these genuinely tappable at every detent.
+    ///
+    /// relocatedIconsTopPadding (passed in from MainDashboardView, which has
+    /// the geometry this view doesn't) cancels out the sheet's own vertical
+    /// movement so this still lands at the same absolute screen position -
+    /// the same column, right under the globe/locate buttons - regardless
+    /// of which detent moved this view's local coordinate space. Untied
+    /// from this view's own width entirely (unlike an earlier attempt that
+    /// capped a "pill" width and positioned this relative to it) - a
+    /// NavigationStack + .toolbar{} version was also tried, hoping the
+    /// system would place these automatically, but it relocated them
+    /// vertically only within this view's own trailing edge, not the true
+    /// hardware column - still tied to wherever this view happened to end,
+    /// which is exactly what this ignoresSafeArea approach avoids.
+    ///
+    /// Not centred within the column the way the map's single button is:
+    /// four 44pt buttons plus spacing (~212pt) can't fit inside an 84pt
+    /// column at all, so centring doesn't apply here. A small flat trailing
+    /// margin instead lines the last (gear) button up with the column's own
+    /// trailing edge, and the row extends leftward from there - the best
+    /// fit available for content wider than the space it's aligning to.
+    @ViewBuilder
+    private var relocatedIconRow: some View {
+        if iconRowIsRelocated {
+            VStack {
+                HStack {
+                    Spacer()
+                    quickIconRow
+                        .padding(.top, relocatedIconsTopPadding)
+                        .padding(.trailing, 16)
+                }
+                Spacer()
+            }
+            .ignoresSafeArea(.container, edges: .trailing)
+        }
+    }
 
     private var headerBar: some View {
-        Group {
-            if clusterWidth > 0 && sheetDetent == .large {
-                // Fully expanded, the header sits near the true top of the
-                // screen, level with Duo's outer-display status column - the
-                // icon row moves into a column on the right below it, the
-                // same way the map's own floating controls do, rather than
-                // competing with the vehicle name for a cramped inline row.
-                ZStack(alignment: .topTrailing) {
-                    vehicleMenuLabel
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    quickIconRow
-                        .padding(.top, Self.expandedIconRowTopInset)
-                }
-            } else {
-                HStack(spacing: 16) {
-                    vehicleMenuLabel
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    quickIconRow
-                }
+        HStack(spacing: 16) {
+            vehicleMenuLabel
+                .frame(maxWidth: .infinity, alignment: .leading)
+            if !iconRowIsRelocated {
+                quickIconRow
             }
         }
         .padding(.horizontal, 24).padding(.top, 24).padding(.bottom, 16)
@@ -982,9 +1045,11 @@ struct DashboardSheetContent: View {
             .fontDesign(.rounded)
     }
 
+    /// Plain SF Symbol buttons - the standard iOS toolbar-icon look, not the
+    /// filled circular backdrop these had before.
     private var quickIconRow: some View {
             HStack(spacing: 12) {
-                Button { showingAddVehicle = true } label: { Image(systemName: "plus").font(.system(size: 20, weight: .semibold)).foregroundColor(.primary).frame(width: 44, height: 44).background(Color(uiColor: .tertiarySystemFill), in: Circle()) }
+                Button { showingAddVehicle = true } label: { Image(systemName: "plus").font(.system(size: 20, weight: .semibold)).foregroundStyle(.primary).frame(width: 44, height: 44) }
                     .hoverEffect(.highlight)
                 Button {
                     if let month = newReportMonth {
@@ -996,26 +1061,20 @@ struct DashboardSheetContent: View {
                     }
                 } label: {
                     Image(systemName: "map.fill").font(.system(size: 20))
-                        .foregroundColor(newReportMonth != nil ? Color.accentColor : .primary)
+                        .foregroundStyle(newReportMonth != nil ? Color.accentColor : .primary)
                         .frame(width: 44, height: 44)
-                        .background(newReportMonth != nil ? Color.accentColor.opacity(0.2) : Color(uiColor: .tertiarySystemFill), in: Circle())
-                        .overlay {
-                            if newReportMonth != nil {
-                                Circle().strokeBorder(Color.accentColor, lineWidth: 2).shadow(color: .accentColor.opacity(0.9), radius: 5)
-                            }
-                        }
                         .symbolEffect(.pulse, options: .repeating, isActive: newReportMonth != nil)
                 }.accessibilityIdentifier("TripsButton")
                     .hoverEffect(.highlight)
-                Button { shareVehicleForLogging() } label: { Image(systemName: "square.and.arrow.up").font(.system(size: 20)).foregroundColor(.primary).frame(width: 44, height: 44).background(Color(uiColor: .tertiarySystemFill), in: Circle()) }
+                Button { shareVehicleForLogging() } label: { Image(systemName: "square.and.arrow.up").font(.system(size: 20)).foregroundStyle(.primary).frame(width: 44, height: 44) }
                     .accessibilityIdentifier("ShareVehicleButton")
                     .accessibilityLabel("Share \(vehicle.name) for logging")
                     .hoverEffect(.highlight)
-                Button { showingSettings = true } label: { Image(systemName: "gearshape.fill").font(.system(size: 20)).foregroundColor(.primary).frame(width: 44, height: 44).background(Color(uiColor: .tertiarySystemFill), in: Circle()) }
+                Button { showingSettings = true } label: { Image(systemName: "gearshape.fill").font(.system(size: 20)).foregroundStyle(.primary).frame(width: 44, height: 44) }
                     .hoverEffect(.highlight)
             }
     }
-    
+
     /// Creates a "share for logging" link for the current vehicle and presents
     /// the system share sheet. A borrower opens the link in the App Clip, logs a
     /// fill-up, and it syncs back into this vehicle via the relay.
