@@ -159,10 +159,13 @@ struct AboutView: View {
                 .disabled(storeKit.isPurchasing)
             }
 
-        }
-        // Pinned to the bottom of the screen rather than trailing the last row,
-        // so it sits consistently low on every device size.
-        .safeAreaInset(edge: .bottom) {
+            // A row in the list rather than a `.safeAreaInset(edge: .bottom)`
+            // footer: on a short screen (Duo's outer display) the inset
+            // footer overlapped the Support Developer section instead of
+            // sitting cleanly below it - the inset didn't reserve enough
+            // scroll room for its own content on that height. As a normal
+            // list row it flows below the section with the list's own
+            // spacing, so there's nothing to get the sizing wrong.
             VStack(spacing: 6) {
                 Text("@Motosung, 2026")
                 Text(appVersion)
@@ -170,7 +173,9 @@ struct AboutView: View {
             .font(.subheadline)
             .foregroundStyle(.secondary)
             .frame(maxWidth: .infinity)
-            .padding(.bottom, 8)
+            .padding(.vertical, 8)
+            .listRowBackground(Color.clear)
+            .listRowInsets(EdgeInsets())
         }
         .navigationTitle("About Fuel Log")
         .navigationBarTitleDisplayMode(.inline)

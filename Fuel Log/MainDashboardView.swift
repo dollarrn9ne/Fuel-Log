@@ -208,18 +208,19 @@ struct MainDashboardView: View {
     /// absolute screen position regardless of which detent moved the
     /// sheet's own top edge. That view's content is positioned relative to
     /// its own top, which is a different absolute screen position at each
-    /// detent (measured on-device: ~413pt at the small detent, ~223pt at
-    /// medium, ~8pt at large) - a fixed padding value only ever looked
-    /// right at whichever one detent it was tuned against.
+    /// detent (measured on-device: ~413pt at the small detent, ~8pt at
+    /// large) - a fixed padding value only ever looked right at whichever
+    /// one detent it was tuned against. Only relevant at the large detent in
+    /// practice, since that's the only one left where the icon row relocates.
     private func relocatedIconsTopPadding(_ proxy: GeometryProxy) -> CGFloat {
-        // sheetFraction is a hand-tuned approximation (0.35/0.65/0.92), not
-        // measured - confirmed on-device at the medium detent that it's off
-        // from the sheet's real rendered top by ~15pt, which without this
-        // margin let the icons land 15pt too high, overlapping the
-        // location button above them. 20pt covers that plus a bit of
-        // breathing room, rather than chasing sheetFraction's exact value
-        // (it's shared with the map-panning maths elsewhere, where that
-        // approximation is fine, so it's not being tightened just for this).
+        // sheetFraction is a hand-tuned approximation (0.35/0.92), not
+        // measured - confirmed on-device it can be off from the sheet's real
+        // rendered top by ~15pt, which without this margin let the icons
+        // land too high, overlapping the location button above them. 20pt
+        // covers that plus a bit of breathing room, rather than chasing
+        // sheetFraction's exact value (it's shared with the map-panning
+        // maths elsewhere, where that approximation is fine, so it's not
+        // being tightened just for this).
         let clearanceMargin: CGFloat = 20
         let targetScreenY = Self.trailingClusterHeightEstimate + 2 * Self.mapControlButtonDiameter + 12 + clearanceMargin
         let sheetTopY = fullHeight(proxy) * (1 - sheetFraction)
@@ -247,8 +248,8 @@ struct MainDashboardView: View {
     @ViewBuilder
     private func bottomSheetContent(_ proxy: GeometryProxy) -> some View {
         DashboardSheetContent(colorScheme: _colorScheme, vehicle: vehicle, allVehicles: allVehicles, events: timelineEvents, onSelectVehicle: onSelectVehicle, newReportMonth: newReportMonth, onAcknowledgeReport: onAcknowledgeReport, selectedLogTab: $selectedLogTab, sheetDetent: $sheetDetent, clusterWidth: trailingClusterWidth(proxy), relocatedIconsTopPadding: relocatedIconsTopPadding(proxy), showingAddFillUp: $showingAddFillUp, fillUpEntryMode: $fillUpEntryMode, showingAddService: $showingAddService, showingTrips: $showingTrips, showingSettings: $showingSettings, showingArchivedVehicles: $showingArchivedVehicles, showingAddVehicle: $showingAddVehicle, showingDeleteConfirmation: $showingDeleteConfirmation, showingCharts: $showingCharts, showingMonthlyReport: $showingMonthlyReport, monthlyReportMonth: $monthlyReportMonth, eventToEdit: $eventToEdit, vehicleToEdit: $vehicleToEdit)
-            .presentationDetents([.fraction(0.35), .fraction(0.65), .large], selection: $sheetDetent)
-            .presentationDragIndicator(.visible).presentationBackgroundInteraction(.enabled(upThrough: .fraction(0.65))).interactiveDismissDisabled()
+            .presentationDetents([.fraction(0.35), .large], selection: $sheetDetent)
+            .presentationDragIndicator(.visible).presentationBackgroundInteraction(.enabled(upThrough: .fraction(0.35))).interactiveDismissDisabled()
             .presentationBackground { panelBackground(in: Rectangle()) }
     }
 
@@ -284,10 +285,10 @@ struct MainDashboardView: View {
 
     /// How much of the screen the bottom sheet currently covers. `PresentationDetent`
     /// doesn't expose its fraction, so map the known detents back to their values.
+    /// Only two detents are offered now (small/large) - the middle one was
+    /// removed at the user's request.
     private var sheetFraction: CGFloat {
-        if sheetDetent == .large { return 0.92 }
-        if sheetDetent == .fraction(0.65) { return 0.65 }
-        return Self.smallestSheetFraction
+        sheetDetent == .large ? 0.92 : Self.smallestSheetFraction
     }
 
     /// Width the side panel needs before it earns its place: 420pt of panel plus
@@ -938,8 +939,8 @@ struct DashboardSheetContent: View {
     /// sitting inline in the header.
     private var iconRowIsRelocated: Bool { clusterWidth > 0 && sheetDetent != .fraction(0.35) }
 
-    /// Total height of the relocated row: 4 buttons at 44pt plus 3 gaps at
-    /// 12pt (matches quickIconRow's own spacing). Used to reserve room for
+    /// Total height of the relocated column: 4 buttons at 44pt plus 3 gaps at
+    /// 12pt (matches quickIconColumn's own spacing). Used to reserve room for
     /// it below the header - see body's Color.clear spacer.
     private static let relocatedIconRowHeight: CGFloat = 4 * 44 + 3 * 12
 
@@ -967,27 +968,44 @@ struct DashboardSheetContent: View {
     /// hardware column - still tied to wherever this view happened to end,
     /// which is exactly what this ignoresSafeArea approach avoids.
     ///
-    /// Not centred within the column the way the map's single button is:
-    /// four 44pt buttons plus spacing (~212pt) can't fit inside an 84pt
-    /// column at all, so centring doesn't apply here. A small flat trailing
-    /// margin instead lines the last (gear) button up with the column's own
-    /// trailing edge, and the row extends leftward from there - the best
-    /// fit available for content wider than the space it's aligning to.
+    /// Stacked vertically (see `quickIconColumn`) rather than in a row: a
+    /// single 44pt-wide column fits inside the reserved 84pt column the same
+    /// way the map's single button does, so it's centred the same way too -
+    /// unlike an earlier horizontal layout, which was too wide to fit and
+    /// had to hang its trailing edge off the column's own trailing edge
+    /// instead.
     @ViewBuilder
     private var relocatedIconRow: some View {
         if iconRowIsRelocated {
             VStack {
                 HStack {
                     Spacer()
-                    quickIconRow
+                    quickIconColumn
                         .padding(.top, relocatedIconsTopPadding)
-                        .padding(.trailing, 16)
+                        .padding(.trailing, max(0, (clusterWidth - Self.relocatedIconColumnWidth) / 2 - Self.sheetEdgeInset))
                 }
                 Spacer()
             }
             .ignoresSafeArea(.container, edges: .trailing)
         }
     }
+
+    /// A single icon button's own width (44pt) - see `relocatedIconRow`'s
+    /// centring maths, which mirrors MainDashboardView's for the map's
+    /// floating buttons now that this column is narrow enough to fit.
+    private static let relocatedIconColumnWidth: CGFloat = 44
+
+    /// This view's content sits inside a `.sheet()` presentation, which the
+    /// system insets a fixed margin from every screen edge on its own -
+    /// `.ignoresSafeArea(.container, edges: .trailing)` above reaches past
+    /// this view's normal safe area, but not past that separate presentation
+    /// margin, since it isn't a safe area at all. The map's globe/locate
+    /// buttons don't have this problem (they're drawn by the presenter, not
+    /// inside the sheet), so centring both against the same trailing-edge
+    /// column left this one ~8pt further left. Confirmed on-device: the icon
+    /// column measured ~7.6pt left of the map buttons' column before this
+    /// correction.
+    private static let sheetEdgeInset: CGFloat = 8
 
     private var headerBar: some View {
         HStack(spacing: 16) {
@@ -1030,12 +1048,12 @@ struct DashboardSheetContent: View {
                     Text(vehicle.name)
                         .font(.title2.weight(.heavy))
                         .foregroundColor(.primary)
-                        // Up to two lines before shrinking, so a long name wraps
-                        // rather than being clipped mid-word.
-                        .lineLimit(2)
+                        // Single line, shrinking a long name to fit rather than
+                        // wrapping it - wrapping pushed the header taller and
+                        // crowded the row below it.
+                        .lineLimit(1)
                         .minimumScaleFactor(0.75)
                         .allowsTightening(true)
-                        .multilineTextAlignment(.leading)
                     Image(systemName: "chevron.down").font(.subheadline.weight(.bold)).foregroundColor(.secondary)
                 }
             }
@@ -1045,34 +1063,57 @@ struct DashboardSheetContent: View {
             .fontDesign(.rounded)
     }
 
-    /// Plain SF Symbol buttons - the standard iOS toolbar-icon look, not the
-    /// filled circular backdrop these had before.
-    private var quickIconRow: some View {
-            HStack(spacing: 12) {
-                Button { showingAddVehicle = true } label: { Image(systemName: "plus").font(.system(size: 20, weight: .semibold)).foregroundStyle(.primary).frame(width: 44, height: 44) }
-                    .hoverEffect(.highlight)
-                Button {
-                    if let month = newReportMonth {
-                        onAcknowledgeReport()
-                        monthlyReportMonth = month
-                        showingMonthlyReport = true
-                    } else {
-                        showingTrips = true
-                    }
-                } label: {
-                    Image(systemName: "map.fill").font(.system(size: 20))
-                        .foregroundStyle(newReportMonth != nil ? Color.accentColor : .primary)
-                        .frame(width: 44, height: 44)
-                        .symbolEffect(.pulse, options: .repeating, isActive: newReportMonth != nil)
-                }.accessibilityIdentifier("TripsButton")
-                    .hoverEffect(.highlight)
-                Button { shareVehicleForLogging() } label: { Image(systemName: "square.and.arrow.up").font(.system(size: 20)).foregroundStyle(.primary).frame(width: 44, height: 44) }
-                    .accessibilityIdentifier("ShareVehicleButton")
-                    .accessibilityLabel("Share \(vehicle.name) for logging")
-                    .hoverEffect(.highlight)
-                Button { showingSettings = true } label: { Image(systemName: "gearshape.fill").font(.system(size: 20)).foregroundStyle(.primary).frame(width: 44, height: 44) }
-                    .hoverEffect(.highlight)
+    /// The 4 buttons shared by `quickIconRow` (inline, horizontal) and
+    /// `quickIconColumn` (relocated into Duo's outer-display column,
+    /// vertical) - same buttons, just arranged differently by their
+    /// container. `.buttonStyle(.plain)` on both containers is what makes
+    /// `foregroundStyle(.primary)` actually stick: left off, the default
+    /// button style tinted these with the accent colour instead (visible
+    /// on-device as the plus/share/gear icons rendering blue while the map
+    /// icon, whose foregroundStyle branches on `newReportMonth`, happened to
+    /// still read correctly only when that branch resolved to `.primary`).
+    @ViewBuilder
+    private var quickIconButtons: some View {
+        Button { showingAddVehicle = true } label: { Image(systemName: "plus").font(.system(size: 20, weight: .semibold)).foregroundStyle(.primary).frame(width: 44, height: 44) }
+            .hoverEffect(.highlight)
+        Button {
+            if let month = newReportMonth {
+                onAcknowledgeReport()
+                monthlyReportMonth = month
+                showingMonthlyReport = true
+            } else {
+                showingTrips = true
             }
+        } label: {
+            Image(systemName: "map.fill").font(.system(size: 20))
+                .foregroundStyle(newReportMonth != nil ? Color.accentColor : .primary)
+                .frame(width: 44, height: 44)
+                .symbolEffect(.pulse, options: .repeating, isActive: newReportMonth != nil)
+        }.accessibilityIdentifier("TripsButton")
+            .hoverEffect(.highlight)
+        Button { shareVehicleForLogging() } label: { Image(systemName: "square.and.arrow.up").font(.system(size: 20)).foregroundStyle(.primary).frame(width: 44, height: 44) }
+            .accessibilityIdentifier("ShareVehicleButton")
+            .accessibilityLabel("Share \(vehicle.name) for logging")
+            .hoverEffect(.highlight)
+        Button { showingSettings = true } label: { Image(systemName: "gearshape.fill").font(.system(size: 20)).foregroundStyle(.primary).frame(width: 44, height: 44) }
+            .hoverEffect(.highlight)
+    }
+
+    /// Plain SF Symbol buttons - the standard iOS toolbar-icon look, not the
+    /// filled circular backdrop these had before. Used inline in the header
+    /// everywhere the icon row isn't relocated (a normal iPhone, iPad, or
+    /// Duo's outer display at the small detent).
+    private var quickIconRow: some View {
+        HStack(spacing: 12) { quickIconButtons }
+            .buttonStyle(.plain)
+    }
+
+    /// Same 4 buttons stacked vertically instead of in a row - used only by
+    /// `relocatedIconRow`, matching the vertical column the system uses for
+    /// its own status/toolbar icons on Duo's outer display.
+    private var quickIconColumn: some View {
+        VStack(spacing: 12) { quickIconButtons }
+            .buttonStyle(.plain)
     }
 
     /// Creates a "share for logging" link for the current vehicle and presents
