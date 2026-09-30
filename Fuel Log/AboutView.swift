@@ -32,96 +32,63 @@ struct AboutView: View {
     @Environment(\.requestReview) private var requestReview
     @StateObject private var storeKit = StoreKitManager()
     @State private var showingSimulatorReviewNote = false
-    
+
     private var appVersion: String {
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0"
         return "Version \(version)"
     }
-    
+
     private var isErrorPresented: Binding<Bool> {
         Binding(get: { storeKit.errorMessage != nil }, set: { if !$0 { storeKit.errorMessage = nil } })
     }
-    
+
+    // A plain VStack rather than a List: a List is always a scroll view, and
+    // this page's content is short enough to lay out statically on one
+    // screen (including Duo's shorter outer display) without needing one.
+    // The 4 action rows are grouped into a single card instead of a List
+    // Section, so there's one section, not several.
     var body: some View {
-        List {
-            VStack(spacing: 16) {
-                AppLogoIcon()
-                    .frame(width: 100, height: 100)
-                    .shadow(color: .black.opacity(0.15), radius: 10, x: 0, y: 5)
-                    .padding(.top, 24)
-                
-                Text("Fuel Log")
-                    .font(.title2.weight(.bold))
-                
-                VStack(spacing: 6) {
-                    Text("Jeremiah 29:11")
-                        .foregroundStyle(.secondary)
-                    
-                    Text("Made in California, by a Ukrainian")
-                        .foregroundStyle(.secondary)
-                    
-                    Text("No Subscription, Ever.")
-                        .fontWeight(.bold)
-                        .foregroundStyle(.primary)
-                }
-                .font(.subheadline)
+        VStack(spacing: 16) {
+            AppLogoIcon()
+                .frame(width: 90, height: 90)
+                .shadow(color: .black.opacity(0.15), radius: 10, x: 0, y: 5)
+
+            Text("Fuel Log")
+                .font(.title2.weight(.bold))
+
+            VStack(spacing: 6) {
+                Text("Jeremiah 29:11")
+                    .foregroundStyle(.secondary)
+
+                Text("Made in California, by a Ukrainian")
+                    .foregroundStyle(.secondary)
+
+                Text("No Subscription, Ever.")
+                    .fontWeight(.bold)
+                    .foregroundStyle(.primary)
             }
-            .frame(maxWidth: .infinity)
-            .listRowBackground(Color.clear)
-            .listRowInsets(EdgeInsets())
-            .padding(.bottom, 16)
-            
-            Section {
-                Button(action: {
-                    if let url = URL(string: "mailto:imotosung@icloud.com") {
-                        openURL(url)
-                    }
-                }) {
-                    HStack(spacing: 16) {
-                        Image(systemName: "envelope.fill")
-                            .foregroundStyle(.blue)
-                            .font(.title3)
-                            .frame(width: 24)
-                        
-                        Text("Email Developer")
-                            .foregroundStyle(.primary)
-                    }
+            .font(.subheadline)
+
+            VStack(spacing: 0) {
+                aboutRow(systemImage: "envelope.fill", title: "Email Developer") {
+                    if let url = URL(string: "mailto:imotosung@icloud.com") { openURL(url) }
                 }
-                
-                Button(action: {
+                Divider().padding(.leading, 56)
+
+                aboutRow(systemImage: "star.fill", title: "Rate and Review") {
                     #if targetEnvironment(simulator)
                     showingSimulatorReviewNote = true
                     #else
                     requestReview()
                     #endif
-                }) {
-                    HStack(spacing: 16) {
-                        Image(systemName: "star.fill")
-                            .foregroundStyle(.blue)
-                            .font(.title3)
-                            .frame(width: 24)
-                        
-                        Text("Rate and Review")
-                            .foregroundStyle(.primary)
-                    }
                 }
-                
-                Button(action: {
-                    if let url = URL(string: "https://t.me/+OaIw90MuUt9iYmI5") {
-                        openURL(url)
-                    }
-                }) {
-                    HStack(spacing: 16) {
-                        Image(systemName: "paperplane.fill")
-                            .foregroundStyle(.blue)
-                            .font(.title3)
-                            .frame(width: 24)
-                        
-                        Text("Telegram Updates")
-                            .foregroundStyle(.primary)
-                    }
+                Divider().padding(.leading, 56)
+
+                aboutRow(systemImage: "paperplane.fill", title: "Telegram Updates") {
+                    if let url = URL(string: "https://t.me/+OaIw90MuUt9iYmI5") { openURL(url) }
                 }
-                
+                Divider().padding(.leading, 56)
+
                 Menu {
                     ForEach(SupportTier.allCases) { tier in
                         Button(storeKit.displayPrice(for: tier)) {
@@ -155,28 +122,28 @@ struct AboutView: View {
                                 .foregroundStyle(.secondary)
                         }
                     }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
+                    .contentShape(Rectangle())
                 }
                 .disabled(storeKit.isPurchasing)
             }
+            .applyLiquidGlassOrBackground(cornerRadius: 14, fallbackColor: .secondarySystemGroupedBackground)
 
-            // A row in the list rather than a `.safeAreaInset(edge: .bottom)`
-            // footer: on a short screen (Duo's outer display) the inset
-            // footer overlapped the Support Developer section instead of
-            // sitting cleanly below it - the inset didn't reserve enough
-            // scroll room for its own content on that height. As a normal
-            // list row it flows below the section with the list's own
-            // spacing, so there's nothing to get the sizing wrong.
+            Spacer(minLength: 0)
+
             VStack(spacing: 6) {
                 Text("@Motosung, 2026")
                 Text(appVersion)
             }
             .font(.subheadline)
             .foregroundStyle(.secondary)
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 8)
-            .listRowBackground(Color.clear)
-            .listRowInsets(EdgeInsets())
         }
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 24)
+        .padding(.top, 24)
+        .padding(.bottom, 8)
+        .background(Color(uiColor: .systemGroupedBackground).ignoresSafeArea())
         .navigationTitle("About Fuel Log")
         .navigationBarTitleDisplayMode(.inline)
         .alert("Thank you for your support!", isPresented: $storeKit.purchaseCompleted) {
@@ -194,6 +161,27 @@ struct AboutView: View {
         } message: {
             Text("The App Store rating prompt doesn't appear in the Simulator. Run Fuel Log on a real iPhone to rate and review.")
         }
+    }
+
+    @ViewBuilder
+    private func aboutRow(systemImage: String, title: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 16) {
+                Image(systemName: systemImage)
+                    .foregroundStyle(.blue)
+                    .font(.title3)
+                    .frame(width: 24)
+
+                Text(title)
+                    .foregroundStyle(.primary)
+
+                Spacer()
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 }
 

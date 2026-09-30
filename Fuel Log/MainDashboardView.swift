@@ -139,6 +139,39 @@ struct MainDashboardView: View {
     /// it. Matches the on-device measurement (~47pt).
     private static let mapControlButtonDiameter: CGFloat = 47
 
+    /// A floating map control button (globe/locate) - iOS 27's native
+    /// Liquid Glass circular button style where available, falling back to
+    /// the hand-drawn regularMaterial circle on earlier versions. The
+    /// explicit frame is set on the button itself (not just its label) in
+    /// both branches so `mapControlButtonDiameter`'s centring maths stays
+    /// correct regardless of style - `.buttonStyle(.glass)` sizes its own
+    /// capsule/circle backdrop around whatever it's given, which isn't
+    /// guaranteed to match the old hand-drawn circle's exact diameter
+    /// otherwise.
+    @ViewBuilder
+    private func mapControlButton(systemImage: String, action: @escaping () -> Void) -> some View {
+        if #available(iOS 27.0, *) {
+            Button(action: action) { Image(systemName: systemImage).font(.title3).foregroundColor(.primary) }
+                .frame(width: Self.mapControlButtonDiameter, height: Self.mapControlButtonDiameter)
+                .buttonStyle(.glass)
+                .hoverEffect(.highlight)
+        } else {
+            Button(action: action) { Image(systemName: systemImage).font(.title3).foregroundColor(.primary).padding(12).background(.regularMaterial).clipShape(Circle()).shadow(radius: 2) }
+                .frame(width: Self.mapControlButtonDiameter, height: Self.mapControlButtonDiameter)
+                .hoverEffect(.highlight)
+        }
+    }
+
+    /// How much further left the reserved column's true centre sits than
+    /// treating it as flush against the trailing screen edge would suggest.
+    /// Measured on-device from a raw (unscaled, 1pt-per-pixel) screenshot:
+    /// the status bar cluster (camera/clock/wifi) centred at x≈417.55 out of
+    /// a 466pt-wide screen, while naively centring a button in an 84pt
+    /// column flush against x=466 puts it at x≈424 - about 6pt too far
+    /// right. Shared with DashboardSheetContent's relocatedIconRow, which
+    /// has the same constant under the same name for the same reason.
+    private static let reservedColumnRightMargin: CGFloat = 6
+
     /// The floating globe/locate buttons over the map, and the full-screen
     /// map's own presentation. Split out of `body` as its own function -
     /// nested inline, this pushed the type checker over its time limit.
@@ -148,9 +181,7 @@ struct MainDashboardView: View {
     /// a sheet's presentation always renders above its presenter, and
     /// confirmed on-device that presentationBackgroundInteraction doesn't
     /// reliably forward taps to specific buttons underneath it. They have
-    /// to live inside the sheet itself to stay tappable; see
-    /// relocatedIconsTopPadding(_:) for how they still land in this same
-    /// column without being nested in this view.
+    /// to live inside the sheet itself to stay tappable.
     ///
     /// A NavigationStack + .toolbar{} version of this was tried instead,
     /// hoping the system would place the icons automatically the way
@@ -167,16 +198,14 @@ struct MainDashboardView: View {
                 Spacer()
                 VStack(spacing: 12) {
                     if colorScheme != .dark {
-                        Button { useSatellite.toggle() } label: { Image(systemName: useSatellite ? "map.fill" : "globe.americas.fill").font(.title3).foregroundColor(.primary).padding(12).background(.regularMaterial).clipShape(Circle()).shadow(radius: 2) }
-                            .hoverEffect(.highlight)
+                        mapControlButton(systemImage: useSatellite ? "map.fill" : "globe.americas.fill") { useSatellite.toggle() }
                     }
-                    Button {
+                    mapControlButton(systemImage: "location.fill") {
                         if let loc = locationManager.location { withAnimation(.easeInOut(duration: 0.5)) { mapPosition = .region(MKCoordinateRegion(center: loc.coordinate, latitudinalMeters: 1000, longitudinalMeters: 1000)) } } else {
                             locationManager.onLocationUpdate = { loc in withAnimation(.easeInOut(duration: 0.5)) { mapPosition = .region(MKCoordinateRegion(center: loc.coordinate, latitudinalMeters: 1000, longitudinalMeters: 1000)) }; locationManager.onLocationUpdate = nil }
                             locationManager.requestLocation()
                         }
-                    } label: { Image(systemName: "location.fill").font(.title3).foregroundColor(.primary).padding(12).background(.regularMaterial).clipShape(Circle()).shadow(radius: 2) }
-                        .hoverEffect(.highlight)
+                    }
                 }
                 .padding(.leading, 16)
                 .padding(.bottom, 16)
@@ -192,8 +221,17 @@ struct MainDashboardView: View {
                 // toolbar buttons there (see trailingClusterWidth) -
                 // which needs the HStack below to actually reach that
                 // column, hence ignoresSafeArea on the trailing edge.
+                //
+                // reservedColumnRightMargin corrects for the reserved
+                // column not actually being flush against the true
+                // trailing edge - confirmed on-device (measuring a raw,
+                // unscaled screenshot in points) that the status bar
+                // cluster (camera/clock/wifi) sits centred ~6pt further
+                // left than centring against the bare trailing edge
+                // assumes, i.e. there's a small margin beyond the
+                // column's own right edge before the true screen edge.
                 .padding(.trailing, trailingClusterWidth(proxy) > 0
-                    ? max(0, (trailingClusterWidth(proxy) - Self.mapControlButtonDiameter) / 2)
+                    ? max(0, (trailingClusterWidth(proxy) - Self.mapControlButtonDiameter) / 2 + Self.reservedColumnRightMargin)
                     : 16 + (layout(proxy) == .sidePanel ? Self.panelWidth : 0))
                 .opacity(isMapReady ? 1 : 0)
             }
@@ -201,30 +239,6 @@ struct MainDashboardView: View {
         }
         .ignoresSafeArea(.container, edges: .trailing)
         .fullScreenCover(isPresented: $showFullScreenMap) { NavigationStack { VehicleMapView(vehicle: vehicle, useSatellite: $useSatellite, selectedTab: selectedLogTab, initialSelection: nil) } }
-    }
-
-    /// The top padding DashboardSheetContent's relocatedIconRow needs, in
-    /// its own local coordinate space, to land its icons at the same
-    /// absolute screen position regardless of which detent moved the
-    /// sheet's own top edge. That view's content is positioned relative to
-    /// its own top, which is a different absolute screen position at each
-    /// detent (measured on-device: ~413pt at the small detent, ~8pt at
-    /// large) - a fixed padding value only ever looked right at whichever
-    /// one detent it was tuned against. Only relevant at the large detent in
-    /// practice, since that's the only one left where the icon row relocates.
-    private func relocatedIconsTopPadding(_ proxy: GeometryProxy) -> CGFloat {
-        // sheetFraction is a hand-tuned approximation (0.35/0.92), not
-        // measured - confirmed on-device it can be off from the sheet's real
-        // rendered top by ~15pt, which without this margin let the icons
-        // land too high, overlapping the location button above them. 20pt
-        // covers that plus a bit of breathing room, rather than chasing
-        // sheetFraction's exact value (it's shared with the map-panning
-        // maths elsewhere, where that approximation is fine, so it's not
-        // being tightened just for this).
-        let clearanceMargin: CGFloat = 20
-        let targetScreenY = Self.trailingClusterHeightEstimate + 2 * Self.mapControlButtonDiameter + 12 + clearanceMargin
-        let sheetTopY = fullHeight(proxy) * (1 - sheetFraction)
-        return max(0, targetScreenY - sheetTopY)
     }
 
     /// The permanently-presented bottom sheet used on compact width (a
@@ -247,7 +261,7 @@ struct MainDashboardView: View {
     /// of whatever width this pill has.
     @ViewBuilder
     private func bottomSheetContent(_ proxy: GeometryProxy) -> some View {
-        DashboardSheetContent(colorScheme: _colorScheme, vehicle: vehicle, allVehicles: allVehicles, events: timelineEvents, onSelectVehicle: onSelectVehicle, newReportMonth: newReportMonth, onAcknowledgeReport: onAcknowledgeReport, selectedLogTab: $selectedLogTab, sheetDetent: $sheetDetent, clusterWidth: trailingClusterWidth(proxy), relocatedIconsTopPadding: relocatedIconsTopPadding(proxy), showingAddFillUp: $showingAddFillUp, fillUpEntryMode: $fillUpEntryMode, showingAddService: $showingAddService, showingTrips: $showingTrips, showingSettings: $showingSettings, showingArchivedVehicles: $showingArchivedVehicles, showingAddVehicle: $showingAddVehicle, showingDeleteConfirmation: $showingDeleteConfirmation, showingCharts: $showingCharts, showingMonthlyReport: $showingMonthlyReport, monthlyReportMonth: $monthlyReportMonth, eventToEdit: $eventToEdit, vehicleToEdit: $vehicleToEdit)
+        DashboardSheetContent(colorScheme: _colorScheme, vehicle: vehicle, allVehicles: allVehicles, events: timelineEvents, onSelectVehicle: onSelectVehicle, newReportMonth: newReportMonth, onAcknowledgeReport: onAcknowledgeReport, selectedLogTab: $selectedLogTab, sheetDetent: $sheetDetent, clusterWidth: trailingClusterWidth(proxy), showingAddFillUp: $showingAddFillUp, fillUpEntryMode: $fillUpEntryMode, showingAddService: $showingAddService, showingTrips: $showingTrips, showingSettings: $showingSettings, showingArchivedVehicles: $showingArchivedVehicles, showingAddVehicle: $showingAddVehicle, showingDeleteConfirmation: $showingDeleteConfirmation, showingCharts: $showingCharts, showingMonthlyReport: $showingMonthlyReport, monthlyReportMonth: $monthlyReportMonth, eventToEdit: $eventToEdit, vehicleToEdit: $vehicleToEdit)
             .presentationDetents([.fraction(0.35), .large], selection: $sheetDetent)
             .presentationDragIndicator(.visible).presentationBackgroundInteraction(.enabled(upThrough: .fraction(0.35))).interactiveDismissDisabled()
             .presentationBackground { panelBackground(in: Rectangle()) }
@@ -773,13 +787,6 @@ struct DashboardSheetContent: View {
     /// than measured locally, since the parent already has to compute it for
     /// the map controls and the card's own width.
     var clusterWidth: CGFloat = 0
-    /// Top padding relocatedIconRow needs, in this view's own local
-    /// coordinate space, to land at the same absolute screen position
-    /// regardless of detent - see MainDashboardView.relocatedIconsTopPadding(_:),
-    /// which computes it. Not measured locally: this view's coordinate
-    /// space moves with the sheet's own top edge as the detent changes, so
-    /// it has no way to know where the true screen top is on its own.
-    var relocatedIconsTopPadding: CGFloat = 0
 
     /// Owned by MainDashboardView, not here: this view is rebuilt from scratch
     /// whenever an iPad rotation crosses the side-panel/bottom-panel width
@@ -820,8 +827,22 @@ struct DashboardSheetContent: View {
             // left it shorter, so the scroll content below started sooner
             // and rendered directly underneath (visually behind) the
             // floated row instead of clear of it.
+            //
+            // Fixed height now, not tied to the sheet's detent at all: an
+            // earlier version tried to compute this so the column would
+            // line up with the map's globe/locate buttons far above the
+            // sheet's own top edge, using absolute-screen-position maths.
+            // At the large detent that gap could be ~240pt of nothing -
+            // the sheet covers so much of the screen there that "aligning
+            // with the map buttons" mostly meant chasing buttons that are
+            // themselves fully hidden behind the sheet by that point, and
+            // the huge reserved gap was the visible result. Simpler and
+            // correct at every detent: the column just sits right at the
+            // header's own top (see relocatedIconRow's fixed top padding
+            // below), so this only needs to reserve the column's own
+            // height.
             if iconRowIsRelocated {
-                Color.clear.frame(height: relocatedIconsTopPadding + Self.relocatedIconRowHeight)
+                Color.clear.frame(height: Self.relocatedIconRowHeight)
             }
             ScrollView {
                 VStack(spacing: 0) {
@@ -934,10 +955,13 @@ struct DashboardSheetContent: View {
     }
 
     /// True whenever the pill isn't at its smallest detent on Duo's outer
-    /// display - the icon row relocates into the reserved column below the
-    /// status icons at that point (see relocatedIconRow below), rather than
-    /// sitting inline in the header.
-    private var iconRowIsRelocated: Bool { clusterWidth > 0 && sheetDetent != .fraction(0.35) }
+    /// display - the icon row relocates into the reserved column there
+    /// (see relocatedIconRow below), vertically stacked, rather than sitting
+    /// inline in the header. True at every detent now, not just the large
+    /// one - a horizontal row only ever fit inline at the small detent, but
+    /// a vertical column fits in the header's own corner regardless of how
+    /// tall the sheet is.
+    private var iconRowIsRelocated: Bool { clusterWidth > 0 }
 
     /// Total height of the relocated column: 4 buttons at 44pt plus 3 gaps at
     /// 12pt (matches quickIconColumn's own spacing). Used to reserve room for
@@ -955,18 +979,23 @@ struct DashboardSheetContent: View {
     /// always renders above its presenter. Living inside the sheet keeps
     /// these genuinely tappable at every detent.
     ///
-    /// relocatedIconsTopPadding (passed in from MainDashboardView, which has
-    /// the geometry this view doesn't) cancels out the sheet's own vertical
-    /// movement so this still lands at the same absolute screen position -
-    /// the same column, right under the globe/locate buttons - regardless
-    /// of which detent moved this view's local coordinate space. Untied
-    /// from this view's own width entirely (unlike an earlier attempt that
-    /// capped a "pill" width and positioned this relative to it) - a
-    /// NavigationStack + .toolbar{} version was also tried, hoping the
-    /// system would place these automatically, but it relocated them
-    /// vertically only within this view's own trailing edge, not the true
-    /// hardware column - still tied to wherever this view happened to end,
-    /// which is exactly what this ignoresSafeArea approach avoids.
+    /// Positioned with a small fixed top padding matching the header's own
+    /// top padding, so the column's top lines up with the vehicle name's
+    /// top - not tied to the sheet's detent at all. An earlier version
+    /// tried to track the sheet's absolute screen position so this would
+    /// align with the map's globe/locate buttons above it, but that only
+    /// ever mattered when both are visible at once (the small detent, where
+    /// the header - and now this column - already sits well below them
+    /// anyway) - at the large detent the sheet covers the map buttons
+    /// entirely, so chasing their position bought nothing but ~240pt of
+    /// empty space. Untied from this view's own width entirely (unlike an
+    /// earlier attempt that capped a "pill" width and positioned this
+    /// relative to it) - a NavigationStack + .toolbar{} version was also
+    /// tried, hoping the system would place these automatically, but it
+    /// relocated them vertically only within this view's own trailing
+    /// edge, not the true hardware column - still tied to wherever this
+    /// view happened to end, which is exactly what this ignoresSafeArea
+    /// approach avoids.
     ///
     /// Stacked vertically (see `quickIconColumn`) rather than in a row: a
     /// single 44pt-wide column fits inside the reserved 84pt column the same
@@ -981,8 +1010,8 @@ struct DashboardSheetContent: View {
                 HStack {
                     Spacer()
                     quickIconColumn
-                        .padding(.top, relocatedIconsTopPadding)
-                        .padding(.trailing, max(0, (clusterWidth - Self.relocatedIconColumnWidth) / 2 - Self.sheetEdgeInset))
+                        .padding(.top, Self.relocatedIconColumnTopPadding)
+                        .padding(.trailing, max(0, (clusterWidth - Self.relocatedIconColumnWidth) / 2 + Self.reservedColumnRightMargin - Self.sheetEdgeInset))
                 }
                 Spacer()
             }
@@ -990,10 +1019,22 @@ struct DashboardSheetContent: View {
         }
     }
 
+    /// Matches headerBar's own `.padding(.top, 24)`, so the column's top
+    /// edge lines up with the vehicle name's top edge.
+    private static let relocatedIconColumnTopPadding: CGFloat = 24
+
     /// A single icon button's own width (44pt) - see `relocatedIconRow`'s
     /// centring maths, which mirrors MainDashboardView's for the map's
     /// floating buttons now that this column is narrow enough to fit.
     private static let relocatedIconColumnWidth: CGFloat = 44
+
+    /// Same correction and same reasoning as
+    /// MainDashboardView.reservedColumnRightMargin - the reserved column
+    /// isn't flush against the true trailing edge, so a naive centring
+    /// lands ~6pt too far right. Duplicated here (not shared) since this is
+    /// a different type with no common ancestor to hang a shared constant
+    /// off of.
+    private static let reservedColumnRightMargin: CGFloat = 6
 
     /// This view's content sits inside a `.sheet()` presentation, which the
     /// system insets a fixed margin from every screen edge on its own -
@@ -1066,15 +1107,16 @@ struct DashboardSheetContent: View {
     /// The 4 buttons shared by `quickIconRow` (inline, horizontal) and
     /// `quickIconColumn` (relocated into Duo's outer-display column,
     /// vertical) - same buttons, just arranged differently by their
-    /// container. `.buttonStyle(.plain)` on both containers is what makes
-    /// `foregroundStyle(.primary)` actually stick: left off, the default
-    /// button style tinted these with the accent colour instead (visible
-    /// on-device as the plus/share/gear icons rendering blue while the map
-    /// icon, whose foregroundStyle branches on `newReportMonth`, happened to
-    /// still read correctly only when that branch resolved to `.primary`).
+    /// container. The explicit `.frame(44, 44)` is on each Button itself
+    /// (not just its label's Image) so it stays exactly 44x44 regardless of
+    /// whichever buttonStyle the container applies - `.buttonStyle(.glass)`
+    /// adds its own internal padding around the label otherwise, which would
+    /// make the rendered button bigger than the label alone and throw off
+    /// `relocatedIconRowHeight`'s per-button sizing assumption.
     @ViewBuilder
     private var quickIconButtons: some View {
-        Button { showingAddVehicle = true } label: { Image(systemName: "plus").font(.system(size: 20, weight: .semibold)).foregroundStyle(.primary).frame(width: 44, height: 44) }
+        Button { showingAddVehicle = true } label: { Image(systemName: "plus").font(.system(size: 20, weight: .semibold)).foregroundStyle(.primary) }
+            .frame(width: 44, height: 44)
             .hoverEffect(.highlight)
         Button {
             if let month = newReportMonth {
@@ -1087,33 +1129,55 @@ struct DashboardSheetContent: View {
         } label: {
             Image(systemName: "map.fill").font(.system(size: 20))
                 .foregroundStyle(newReportMonth != nil ? Color.accentColor : .primary)
-                .frame(width: 44, height: 44)
                 .symbolEffect(.pulse, options: .repeating, isActive: newReportMonth != nil)
-        }.accessibilityIdentifier("TripsButton")
+        }
+            .frame(width: 44, height: 44)
+            .accessibilityIdentifier("TripsButton")
             .hoverEffect(.highlight)
-        Button { shareVehicleForLogging() } label: { Image(systemName: "square.and.arrow.up").font(.system(size: 20)).foregroundStyle(.primary).frame(width: 44, height: 44) }
+        Button { shareVehicleForLogging() } label: { Image(systemName: "square.and.arrow.up").font(.system(size: 20)).foregroundStyle(.primary) }
+            .frame(width: 44, height: 44)
             .accessibilityIdentifier("ShareVehicleButton")
             .accessibilityLabel("Share \(vehicle.name) for logging")
             .hoverEffect(.highlight)
-        Button { showingSettings = true } label: { Image(systemName: "gearshape.fill").font(.system(size: 20)).foregroundStyle(.primary).frame(width: 44, height: 44) }
+        Button { showingSettings = true } label: { Image(systemName: "gearshape.fill").font(.system(size: 20)).foregroundStyle(.primary) }
+            .frame(width: 44, height: 44)
             .hoverEffect(.highlight)
     }
 
-    /// Plain SF Symbol buttons - the standard iOS toolbar-icon look, not the
-    /// filled circular backdrop these had before. Used inline in the header
-    /// everywhere the icon row isn't relocated (a normal iPhone, iPad, or
-    /// Duo's outer display at the small detent).
+    /// iOS 27's native Liquid Glass circular button style where available -
+    /// matching the map's own globe/locate buttons - falling back to plain
+    /// SF Symbols (the standard pre-Glass iOS toolbar-icon look) on earlier
+    /// versions. `.buttonStyle(.plain)` in the fallback branch is what makes
+    /// `foregroundStyle(.primary)` actually stick there: left off, the
+    /// default button style tinted these with the accent colour instead
+    /// (visible on-device as the plus/share/gear icons rendering blue while
+    /// the map icon, whose foregroundStyle branches on `newReportMonth`,
+    /// happened to still read correctly only when that branch resolved to
+    /// `.primary`). Used inline in the header everywhere the icon row isn't
+    /// relocated (a normal iPhone, iPad, or Duo's inner display).
+    @ViewBuilder
     private var quickIconRow: some View {
-        HStack(spacing: 12) { quickIconButtons }
-            .buttonStyle(.plain)
+        if #available(iOS 27.0, *) {
+            HStack(spacing: 12) { quickIconButtons }
+                .buttonStyle(.glass)
+        } else {
+            HStack(spacing: 12) { quickIconButtons }
+                .buttonStyle(.plain)
+        }
     }
 
     /// Same 4 buttons stacked vertically instead of in a row - used only by
     /// `relocatedIconRow`, matching the vertical column the system uses for
     /// its own status/toolbar icons on Duo's outer display.
+    @ViewBuilder
     private var quickIconColumn: some View {
-        VStack(spacing: 12) { quickIconButtons }
-            .buttonStyle(.plain)
+        if #available(iOS 27.0, *) {
+            VStack(spacing: 12) { quickIconButtons }
+                .buttonStyle(.glass)
+        } else {
+            VStack(spacing: 12) { quickIconButtons }
+                .buttonStyle(.plain)
+        }
     }
 
     /// Creates a "share for logging" link for the current vehicle and presents
