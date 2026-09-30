@@ -865,43 +865,32 @@ struct DashboardSheetContent: View {
         VStack(spacing: 0) {
             headerBar
             ScrollView {
-                // Reserves clusterWidth on the trailing edge (a horizontal
-                // inset, not a vertical spacer) so this content's own right
-                // edge stays clear of wherever relocatedIconRow is floating,
-                // applied only to the rows that actually fall within the
+                // No extra trailing inset needed for relocatedIconRow here,
+                // on any row - this content's own `.padding(.horizontal, 24)`
+                // already lands its right edge a comfortable ~14pt clear of
+                // the icon column on its own (confirmed on-device), since
+                // the sheet's content canvas isn't the bare screen width to
+                // begin with (see sheetEdgeInset below). Two earlier
+                // versions added one anyway: first to the *entire* scrolling
+                // content (narrowing rows nowhere near the icon column, for
+                // no reason - a wide empty strip down the whole right side
+                // of the sheet), then narrowed to just the rows within the
                 // icon column's vertical extent (the stats grid, quick
-                // action buttons, and maintenance banner - together always
-                // shorter than the column). An earlier version applied this
-                // inset to the *entire* scrolling content, all the way down
-                // through the charts button, log tabs, search bar and the
-                // whole log list - none of which are anywhere near the icon
-                // column, so they were narrowed for no reason, leaving a
-                // wide empty strip down the right side of the whole sheet.
-                // That in turn replaced an even earlier version that
-                // reserved *vertical* space above this ScrollView sized to
-                // clear the icon column's full height - since that column
-                // has to start well below the header to clear Duo's
-                // status-bar cluster, the reserved zone was taller than the
-                // header by a lot, and everything except a narrow strip on
-                // the right (where the icons actually are) was blank.
-                // Confirmed on-device as the reported "empty space" in both
-                // forms. The icon column simply floats over the corner of
+                // action buttons, and maintenance banner) - which turned out
+                // to be redundant with the clearance those rows already
+                // had, just adding unnecessary extra empty space above them
+                // instead. Before that, an even earlier version reserved
+                // *vertical* space above this ScrollView sized to clear the
+                // icon column's full height, which was worse still - see
+                // memory for the full history if this needs revisiting
+                // again. The icon column simply floats over the corner of
                 // whatever's there, the same way the map's own floating
-                // buttons already do over the map - it only needs the rows
-                // actually underneath it to leave room, not the whole page.
+                // buttons already do over the map, and needs nothing from
+                // this content at all.
                 VStack(spacing: 0) {
-                    FlightyStatsGrid(vehicle: vehicle, selectedTab: selectedLogTab)
-                        .padding(.horizontal, 24)
-                        .padding(.trailing, iconRowIsRelocated ? clusterWidth : 0)
-                        .padding(.bottom, 24)
+                    FlightyStatsGrid(vehicle: vehicle, selectedTab: selectedLogTab).padding(.horizontal, 24).padding(.bottom, 24)
                     quickActionButtons
-                        .padding(.trailing, iconRowIsRelocated ? clusterWidth : 0)
-                    if vehicle.isMaintenanceDue {
-                        MaintenanceAlertView(vehicle: vehicle)
-                            .padding(.horizontal, 24)
-                            .padding(.trailing, iconRowIsRelocated ? clusterWidth : 0)
-                            .padding(.bottom, 16)
-                    }
+                    if vehicle.isMaintenanceDue { MaintenanceAlertView(vehicle: vehicle).padding(.horizontal, 24).padding(.bottom, 16) }
 
                     if !(vehicle.fillUps?.isEmpty ?? true) || !(vehicle.services?.isEmpty ?? true) {
                         Button {
