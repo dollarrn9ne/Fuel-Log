@@ -139,22 +139,28 @@ struct MainDashboardView: View {
     /// it. Matches the on-device measurement (~47pt).
     private static let mapControlButtonDiameter: CGFloat = 47
 
-    /// A floating map control button (globe/locate) - iOS 27's native
-    /// Liquid Glass circular button style where available, falling back to
-    /// the hand-drawn regularMaterial circle on earlier versions. The
-    /// explicit frame is set on the button itself (not just its label) in
-    /// both branches so `mapControlButtonDiameter`'s centring maths stays
-    /// correct regardless of style - `.buttonStyle(.glass)` sizes its own
-    /// capsule/circle backdrop around whatever it's given, which isn't
-    /// guaranteed to match the old hand-drawn circle's exact diameter
-    /// otherwise.
+    /// A floating map control button (globe/locate) - Liquid Glass where
+    /// available, falling back to the hand-drawn regularMaterial circle on
+    /// earlier versions. `.glassEffect(_:in:)` applied directly to the
+    /// label, explicitly shaped as a `Circle`, rather than
+    /// `.buttonStyle(.glass)` - that style sizes its own capsule/circle
+    /// backdrop to fit the label's own content, which on-device rendered as
+    /// a visibly different-width oval per icon (each SF Symbol glyph has
+    /// its own natural bounding box) instead of a uniform circle, and
+    /// wrapping the label in an explicit `.frame` first didn't change that
+    /// - the frame constrained the button's tappable area, not the glass
+    /// shape drawn inside it. Sizing the label to `mapControlButtonDiameter`
+    /// *before* the glassEffect is what actually forces a true circle.
     @ViewBuilder
     private func mapControlButton(systemImage: String, action: @escaping () -> Void) -> some View {
-        if #available(iOS 27.0, *) {
-            Button(action: action) { Image(systemName: systemImage).font(.title3).foregroundColor(.primary) }
-                .frame(width: Self.mapControlButtonDiameter, height: Self.mapControlButtonDiameter)
-                .buttonStyle(.glass)
-                .hoverEffect(.highlight)
+        if #available(iOS 26.0, *) {
+            Button(action: action) {
+                Image(systemName: systemImage).font(.title3).foregroundColor(.primary)
+                    .frame(width: Self.mapControlButtonDiameter, height: Self.mapControlButtonDiameter)
+                    .glassEffect(.regular, in: Circle())
+            }
+            .buttonStyle(.plain)
+            .hoverEffect(.highlight)
         } else {
             Button(action: action) { Image(systemName: systemImage).font(.title3).foregroundColor(.primary).padding(12).background(.regularMaterial).clipShape(Circle()).shadow(radius: 2) }
                 .frame(width: Self.mapControlButtonDiameter, height: Self.mapControlButtonDiameter)
@@ -862,25 +868,40 @@ struct DashboardSheetContent: View {
                 // Reserves clusterWidth on the trailing edge (a horizontal
                 // inset, not a vertical spacer) so this content's own right
                 // edge stays clear of wherever relocatedIconRow is floating,
-                // at every row, without needing to know its exact vertical
-                // extent at all. An earlier version instead reserved
-                // *vertical* space above this ScrollView sized to clear the
-                // icon column's full height - since that column has to
-                // start well below the header to clear Duo's status-bar
-                // cluster, the reserved zone was taller than the header by
-                // a lot, and everything except a narrow strip on the right
-                // (where the icons actually are) was blank - confirmed
-                // on-device as the reported "empty space", visible even
-                // after correcting the reservation's own arithmetic. A
-                // trailing inset instead lets content start immediately
-                // below the header, same as before this row existed at
-                // all - the icon column simply floats over the corner of
+                // applied only to the rows that actually fall within the
+                // icon column's vertical extent (the stats grid, quick
+                // action buttons, and maintenance banner - together always
+                // shorter than the column). An earlier version applied this
+                // inset to the *entire* scrolling content, all the way down
+                // through the charts button, log tabs, search bar and the
+                // whole log list - none of which are anywhere near the icon
+                // column, so they were narrowed for no reason, leaving a
+                // wide empty strip down the right side of the whole sheet.
+                // That in turn replaced an even earlier version that
+                // reserved *vertical* space above this ScrollView sized to
+                // clear the icon column's full height - since that column
+                // has to start well below the header to clear Duo's
+                // status-bar cluster, the reserved zone was taller than the
+                // header by a lot, and everything except a narrow strip on
+                // the right (where the icons actually are) was blank.
+                // Confirmed on-device as the reported "empty space" in both
+                // forms. The icon column simply floats over the corner of
                 // whatever's there, the same way the map's own floating
-                // buttons already do over the map.
+                // buttons already do over the map - it only needs the rows
+                // actually underneath it to leave room, not the whole page.
                 VStack(spacing: 0) {
-                    FlightyStatsGrid(vehicle: vehicle, selectedTab: selectedLogTab).padding(.horizontal, 24).padding(.bottom, 24)
+                    FlightyStatsGrid(vehicle: vehicle, selectedTab: selectedLogTab)
+                        .padding(.horizontal, 24)
+                        .padding(.trailing, iconRowIsRelocated ? clusterWidth : 0)
+                        .padding(.bottom, 24)
                     quickActionButtons
-                    if vehicle.isMaintenanceDue { MaintenanceAlertView(vehicle: vehicle).padding(.horizontal, 24).padding(.bottom, 16) }
+                        .padding(.trailing, iconRowIsRelocated ? clusterWidth : 0)
+                    if vehicle.isMaintenanceDue {
+                        MaintenanceAlertView(vehicle: vehicle)
+                            .padding(.horizontal, 24)
+                            .padding(.trailing, iconRowIsRelocated ? clusterWidth : 0)
+                            .padding(.bottom, 16)
+                    }
 
                     if !(vehicle.fillUps?.isEmpty ?? true) || !(vehicle.services?.isEmpty ?? true) {
                         Button {
@@ -923,7 +944,6 @@ struct DashboardSheetContent: View {
 
                     logViewArea
                 }
-                .padding(.trailing, iconRowIsRelocated ? clusterWidth : 0)
             }
         }
 
@@ -1134,21 +1154,47 @@ struct DashboardSheetContent: View {
             .fontDesign(.rounded)
     }
 
+    /// A single quick-action icon button, shared by `quickIconButtons`
+    /// below - Liquid Glass where available, explicitly shaped as a
+    /// `Circle` (see `mapControlButton`'s comment: `.buttonStyle(.glass)`
+    /// sizes its capsule to the label's own content, which rendered as a
+    /// visibly different-width oval per icon instead of a uniform circle -
+    /// sizing the label to a fixed 44x44 frame *before* the glassEffect is
+    /// what actually forces a true circle). `.buttonStyle(.plain)` in the
+    /// fallback branch is what makes an explicit `foregroundStyle(.primary)`
+    /// on the label actually stick there: left off, the default button
+    /// style tinted these with the accent colour instead (visible on-device
+    /// as the plus/share/gear icons rendering blue while the map icon,
+    /// whose foregroundStyle branches on `newReportMonth`, happened to
+    /// still read correctly only when that branch resolved to `.primary`).
+    @ViewBuilder
+    private func quickIconButton(action: @escaping () -> Void, @ViewBuilder label: () -> some View) -> some View {
+        if #available(iOS 26.0, *) {
+            Button(action: action) {
+                label()
+                    .frame(width: 44, height: 44)
+                    .glassEffect(.regular, in: Circle())
+            }
+            .buttonStyle(.plain)
+            .hoverEffect(.highlight)
+        } else {
+            Button(action: action) { label() }
+                .frame(width: 44, height: 44)
+                .buttonStyle(.plain)
+                .hoverEffect(.highlight)
+        }
+    }
+
     /// The 4 buttons shared by `quickIconRow` (inline, horizontal) and
     /// `quickIconColumn` (relocated into Duo's outer-display column,
     /// vertical) - same buttons, just arranged differently by their
-    /// container. The explicit `.frame(44, 44)` is on each Button itself
-    /// (not just its label's Image) so it stays exactly 44x44 regardless of
-    /// whichever buttonStyle the container applies - `.buttonStyle(.glass)`
-    /// adds its own internal padding around the label otherwise, which would
-    /// make the rendered button bigger than the label alone and throw off
-    /// the vertical spacing between icons in `quickIconColumn`.
+    /// container.
     @ViewBuilder
     private var quickIconButtons: some View {
-        Button { showingAddVehicle = true } label: { Image(systemName: "plus").font(.system(size: 20, weight: .semibold)).foregroundStyle(.primary) }
-            .frame(width: 44, height: 44)
-            .hoverEffect(.highlight)
-        Button {
+        quickIconButton(action: { showingAddVehicle = true }) {
+            Image(systemName: "plus").font(.system(size: 20, weight: .semibold)).foregroundStyle(.primary)
+        }
+        quickIconButton(action: {
             if let month = newReportMonth {
                 onAcknowledgeReport()
                 monthlyReportMonth = month
@@ -1156,58 +1202,33 @@ struct DashboardSheetContent: View {
             } else {
                 showingTrips = true
             }
-        } label: {
+        }) {
             Image(systemName: "map.fill").font(.system(size: 20))
                 .foregroundStyle(newReportMonth != nil ? Color.accentColor : .primary)
                 .symbolEffect(.pulse, options: .repeating, isActive: newReportMonth != nil)
         }
-            .frame(width: 44, height: 44)
-            .accessibilityIdentifier("TripsButton")
-            .hoverEffect(.highlight)
-        Button { shareVehicleForLogging() } label: { Image(systemName: "square.and.arrow.up").font(.system(size: 20)).foregroundStyle(.primary) }
-            .frame(width: 44, height: 44)
-            .accessibilityIdentifier("ShareVehicleButton")
-            .accessibilityLabel("Share \(vehicle.name) for logging")
-            .hoverEffect(.highlight)
-        Button { showingSettings = true } label: { Image(systemName: "gearshape.fill").font(.system(size: 20)).foregroundStyle(.primary) }
-            .frame(width: 44, height: 44)
-            .hoverEffect(.highlight)
+        .accessibilityIdentifier("TripsButton")
+        quickIconButton(action: { shareVehicleForLogging() }) {
+            Image(systemName: "square.and.arrow.up").font(.system(size: 20)).foregroundStyle(.primary)
+        }
+        .accessibilityIdentifier("ShareVehicleButton")
+        .accessibilityLabel("Share \(vehicle.name) for logging")
+        quickIconButton(action: { showingSettings = true }) {
+            Image(systemName: "gearshape.fill").font(.system(size: 20)).foregroundStyle(.primary)
+        }
     }
 
-    /// iOS 27's native Liquid Glass circular button style where available -
-    /// matching the map's own globe/locate buttons - falling back to plain
-    /// SF Symbols (the standard pre-Glass iOS toolbar-icon look) on earlier
-    /// versions. `.buttonStyle(.plain)` in the fallback branch is what makes
-    /// `foregroundStyle(.primary)` actually stick there: left off, the
-    /// default button style tinted these with the accent colour instead
-    /// (visible on-device as the plus/share/gear icons rendering blue while
-    /// the map icon, whose foregroundStyle branches on `newReportMonth`,
-    /// happened to still read correctly only when that branch resolved to
-    /// `.primary`). Used inline in the header everywhere the icon row isn't
-    /// relocated (a normal iPhone, iPad, or Duo's inner display).
-    @ViewBuilder
+    /// Used inline in the header everywhere the icon row isn't relocated (a
+    /// normal iPhone, iPad, or Duo's inner display).
     private var quickIconRow: some View {
-        if #available(iOS 27.0, *) {
-            HStack(spacing: 12) { quickIconButtons }
-                .buttonStyle(.glass)
-        } else {
-            HStack(spacing: 12) { quickIconButtons }
-                .buttonStyle(.plain)
-        }
+        HStack(spacing: 12) { quickIconButtons }
     }
 
     /// Same 4 buttons stacked vertically instead of in a row - used only by
     /// `relocatedIconRow`, matching the vertical column the system uses for
     /// its own status/toolbar icons on Duo's outer display.
-    @ViewBuilder
     private var quickIconColumn: some View {
-        if #available(iOS 27.0, *) {
-            VStack(spacing: 12) { quickIconButtons }
-                .buttonStyle(.glass)
-        } else {
-            VStack(spacing: 12) { quickIconButtons }
-                .buttonStyle(.plain)
-        }
+        VStack(spacing: 12) { quickIconButtons }
     }
 
     /// Creates a "share for logging" link for the current vehicle and presents
