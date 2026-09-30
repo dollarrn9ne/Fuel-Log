@@ -259,9 +259,38 @@ struct MainDashboardView: View {
     /// worth further cycles right now; the icons that need to clear the
     /// column live in relocatedIconRow instead, positioned independently
     /// of whatever width this pill has.
+    /// Extra top padding so the relocated icon column clears Duo's status
+    /// bar column instead of rendering behind it. Confirmed on-device: at
+    /// the large detent the sheet's own top edge sits close to the true
+    /// screen top (well inside the status cluster's ~165pt height), so
+    /// pinning the column to a fixed header-relative offset (right for the
+    /// small detent, where the sheet sits well below the cluster already)
+    /// put its first 1-2 icons underneath the cluster, hidden.
+    ///
+    /// Only clears the cluster itself here - NOT the map's globe/locate
+    /// buttons further below it. An earlier version targeted aligning under
+    /// those too, which meant chasing their position even once the sheet
+    /// covers them entirely (they don't exist in the hierarchy by the large
+    /// detent), reserving space for an alignment nobody could see. This is
+    /// deliberately the smaller of the two asks.
+    private func relocatedIconsTopPadding() -> CGFloat {
+        // sheetFraction * fullHeight is the approximation the map-panning
+        // maths uses elsewhere, where being off by a little is fine - here
+        // it isn't. Confirmed on-device (comparing this formula's estimate
+        // against the icon column's actual measured position) that at the
+        // large detent it under-estimates the sheet's real top by ~46pt
+        // (formula: ~54pt; real: ~8pt), which under-cleared the cluster and
+        // left the topmost ("+") icon rendered behind it instead of below.
+        // These two values are calibrated directly from on-device
+        // measurement instead.
+        let sheetTopY: CGFloat = sheetDetent == .large ? 8 : 413
+        let clusterClearance = max(0, Self.trailingClusterHeightEstimate - sheetTopY)
+        return max(DashboardSheetContent.relocatedIconColumnBaselineTopPadding, clusterClearance)
+    }
+
     @ViewBuilder
     private func bottomSheetContent(_ proxy: GeometryProxy) -> some View {
-        DashboardSheetContent(colorScheme: _colorScheme, vehicle: vehicle, allVehicles: allVehicles, events: timelineEvents, onSelectVehicle: onSelectVehicle, newReportMonth: newReportMonth, onAcknowledgeReport: onAcknowledgeReport, selectedLogTab: $selectedLogTab, sheetDetent: $sheetDetent, clusterWidth: trailingClusterWidth(proxy), showingAddFillUp: $showingAddFillUp, fillUpEntryMode: $fillUpEntryMode, showingAddService: $showingAddService, showingTrips: $showingTrips, showingSettings: $showingSettings, showingArchivedVehicles: $showingArchivedVehicles, showingAddVehicle: $showingAddVehicle, showingDeleteConfirmation: $showingDeleteConfirmation, showingCharts: $showingCharts, showingMonthlyReport: $showingMonthlyReport, monthlyReportMonth: $monthlyReportMonth, eventToEdit: $eventToEdit, vehicleToEdit: $vehicleToEdit)
+        DashboardSheetContent(colorScheme: _colorScheme, vehicle: vehicle, allVehicles: allVehicles, events: timelineEvents, onSelectVehicle: onSelectVehicle, newReportMonth: newReportMonth, onAcknowledgeReport: onAcknowledgeReport, selectedLogTab: $selectedLogTab, sheetDetent: $sheetDetent, clusterWidth: trailingClusterWidth(proxy), relocatedIconsTopPadding: relocatedIconsTopPadding(), showingAddFillUp: $showingAddFillUp, fillUpEntryMode: $fillUpEntryMode, showingAddService: $showingAddService, showingTrips: $showingTrips, showingSettings: $showingSettings, showingArchivedVehicles: $showingArchivedVehicles, showingAddVehicle: $showingAddVehicle, showingDeleteConfirmation: $showingDeleteConfirmation, showingCharts: $showingCharts, showingMonthlyReport: $showingMonthlyReport, monthlyReportMonth: $monthlyReportMonth, eventToEdit: $eventToEdit, vehicleToEdit: $vehicleToEdit)
             .presentationDetents([.fraction(0.35), .large], selection: $sheetDetent)
             .presentationDragIndicator(.visible).presentationBackgroundInteraction(.enabled(upThrough: .fraction(0.35))).interactiveDismissDisabled()
             .presentationBackground { panelBackground(in: Rectangle()) }
@@ -770,6 +799,7 @@ struct ActivityView: UIViewControllerRepresentable {
     func updateUIViewController(_ controller: UIActivityViewController, context: Context) {}
 }
 
+
 // MARK: - Dashboard Bottom Sheet
 struct DashboardSheetContent: View {
     @Environment(\.modelContext) private var modelContext
@@ -787,6 +817,13 @@ struct DashboardSheetContent: View {
     /// than measured locally, since the parent already has to compute it for
     /// the map controls and the card's own width.
     var clusterWidth: CGFloat = 0
+    /// Top padding relocatedIconRow needs, in this view's own local
+    /// coordinate space - see MainDashboardView.relocatedIconsTopPadding(_:),
+    /// which computes it. Not measured locally: it depends on the sheet's
+    /// own absolute screen position (to know whether the column needs extra
+    /// clearance below the status-bar cluster, or just its usual
+    /// header-aligned offset), which only the parent's GeometryProxy has.
+    var relocatedIconsTopPadding: CGFloat = DashboardSheetContent.relocatedIconColumnBaselineTopPadding
 
     /// Owned by MainDashboardView, not here: this view is rebuilt from scratch
     /// whenever an iPad rotation crosses the side-panel/bottom-panel width
@@ -806,7 +843,7 @@ struct DashboardSheetContent: View {
     @Binding var eventToEdit: VehicleEvent?
     @Binding var vehicleToEdit: Vehicle?
     @State private var vehicleShareItem: VehicleShareItem?
-    
+
     @State private var searchText: String = ""
     @StateObject private var sheetMenuCommands = MenuCommandBus.shared
 
@@ -821,30 +858,25 @@ struct DashboardSheetContent: View {
         ZStack(alignment: .topTrailing) {
         VStack(spacing: 0) {
             headerBar
-            // Reserves room for relocatedIconRow, which floats on top as a
-            // separate ZStack layer rather than sitting inline in the
-            // header. Without this, removing the icon row from the header
-            // left it shorter, so the scroll content below started sooner
-            // and rendered directly underneath (visually behind) the
-            // floated row instead of clear of it.
-            //
-            // Fixed height now, not tied to the sheet's detent at all: an
-            // earlier version tried to compute this so the column would
-            // line up with the map's globe/locate buttons far above the
-            // sheet's own top edge, using absolute-screen-position maths.
-            // At the large detent that gap could be ~240pt of nothing -
-            // the sheet covers so much of the screen there that "aligning
-            // with the map buttons" mostly meant chasing buttons that are
-            // themselves fully hidden behind the sheet by that point, and
-            // the huge reserved gap was the visible result. Simpler and
-            // correct at every detent: the column just sits right at the
-            // header's own top (see relocatedIconRow's fixed top padding
-            // below), so this only needs to reserve the column's own
-            // height.
-            if iconRowIsRelocated {
-                Color.clear.frame(height: Self.relocatedIconRowHeight)
-            }
             ScrollView {
+                // Reserves clusterWidth on the trailing edge (a horizontal
+                // inset, not a vertical spacer) so this content's own right
+                // edge stays clear of wherever relocatedIconRow is floating,
+                // at every row, without needing to know its exact vertical
+                // extent at all. An earlier version instead reserved
+                // *vertical* space above this ScrollView sized to clear the
+                // icon column's full height - since that column has to
+                // start well below the header to clear Duo's status-bar
+                // cluster, the reserved zone was taller than the header by
+                // a lot, and everything except a narrow strip on the right
+                // (where the icons actually are) was blank - confirmed
+                // on-device as the reported "empty space", visible even
+                // after correcting the reservation's own arithmetic. A
+                // trailing inset instead lets content start immediately
+                // below the header, same as before this row existed at
+                // all - the icon column simply floats over the corner of
+                // whatever's there, the same way the map's own floating
+                // buttons already do over the map.
                 VStack(spacing: 0) {
                     FlightyStatsGrid(vehicle: vehicle, selectedTab: selectedLogTab).padding(.horizontal, 24).padding(.bottom, 24)
                     quickActionButtons
@@ -891,6 +923,7 @@ struct DashboardSheetContent: View {
 
                     logViewArea
                 }
+                .padding(.trailing, iconRowIsRelocated ? clusterWidth : 0)
             }
         }
 
@@ -963,11 +996,6 @@ struct DashboardSheetContent: View {
     /// tall the sheet is.
     private var iconRowIsRelocated: Bool { clusterWidth > 0 }
 
-    /// Total height of the relocated column: 4 buttons at 44pt plus 3 gaps at
-    /// 12pt (matches quickIconColumn's own spacing). Used to reserve room for
-    /// it below the header - see body's Color.clear spacer.
-    private static let relocatedIconRowHeight: CGFloat = 4 * 44 + 3 * 12
-
     /// The icon row when the pill isn't at its smallest detent, relocated
     /// into Duo's outer-display reserved column - same technique
     /// MainDashboardView uses for the map's own floating buttons
@@ -980,19 +1008,18 @@ struct DashboardSheetContent: View {
     /// these genuinely tappable at every detent.
     ///
     /// Positioned with a small fixed top padding matching the header's own
-    /// top padding, so the column's top lines up with the vehicle name's
-    /// top - not tied to the sheet's detent at all. An earlier version
-    /// tried to track the sheet's absolute screen position so this would
-    /// align with the map's globe/locate buttons above it, but that only
-    /// ever mattered when both are visible at once (the small detent, where
-    /// the header - and now this column - already sits well below them
-    /// anyway) - at the large detent the sheet covers the map buttons
-    /// entirely, so chasing their position bought nothing but ~240pt of
-    /// empty space. Untied from this view's own width entirely (unlike an
-    /// earlier attempt that capped a "pill" width and positioned this
-    /// relative to it) - a NavigationStack + .toolbar{} version was also
-    /// tried, hoping the system would place these automatically, but it
-    /// relocated them vertically only within this view's own trailing
+    /// top padding, normally matching the header's own top padding so the
+    /// column's top lines up with the vehicle name's top - except at the
+    /// large detent, where MainDashboardView.relocatedIconsTopPadding(_:)
+    /// pushes it down further so it clears the status-bar cluster instead
+    /// of rendering behind it (confirmed on-device: without that extra
+    /// clearance, the sheet's own top edge sits so close to the true screen
+    /// top at the large detent that the first 1-2 icons ended up hidden
+    /// underneath the cluster). Untied from this view's own width entirely
+    /// (unlike an earlier attempt that capped a "pill" width and positioned
+    /// this relative to it) - a NavigationStack + .toolbar{} version was
+    /// also tried, hoping the system would place these automatically, but
+    /// it relocated them vertically only within this view's own trailing
     /// edge, not the true hardware column - still tied to wherever this
     /// view happened to end, which is exactly what this ignoresSafeArea
     /// approach avoids.
@@ -1010,7 +1037,7 @@ struct DashboardSheetContent: View {
                 HStack {
                     Spacer()
                     quickIconColumn
-                        .padding(.top, Self.relocatedIconColumnTopPadding)
+                        .padding(.top, relocatedIconsTopPadding)
                         .padding(.trailing, max(0, (clusterWidth - Self.relocatedIconColumnWidth) / 2 + Self.reservedColumnRightMargin - Self.sheetEdgeInset))
                 }
                 Spacer()
@@ -1019,9 +1046,12 @@ struct DashboardSheetContent: View {
         }
     }
 
-    /// Matches headerBar's own `.padding(.top, 24)`, so the column's top
-    /// edge lines up with the vehicle name's top edge.
-    private static let relocatedIconColumnTopPadding: CGFloat = 24
+    /// The `relocatedIconsTopPadding` value to use absent any extra
+    /// clearance need - matches headerBar's own `.padding(.top, 24)`, so the
+    /// column's top edge lines up with the vehicle name's top edge. Also
+    /// this view's default for that parameter, and the floor
+    /// MainDashboardView.relocatedIconsTopPadding(_:) never goes below.
+    static let relocatedIconColumnBaselineTopPadding: CGFloat = 24
 
     /// A single icon button's own width (44pt) - see `relocatedIconRow`'s
     /// centring maths, which mirrors MainDashboardView's for the map's
@@ -1112,7 +1142,7 @@ struct DashboardSheetContent: View {
     /// whichever buttonStyle the container applies - `.buttonStyle(.glass)`
     /// adds its own internal padding around the label otherwise, which would
     /// make the rendered button bigger than the label alone and throw off
-    /// `relocatedIconRowHeight`'s per-button sizing assumption.
+    /// the vertical spacing between icons in `quickIconColumn`.
     @ViewBuilder
     private var quickIconButtons: some View {
         Button { showingAddVehicle = true } label: { Image(systemName: "plus").font(.system(size: 20, weight: .semibold)).foregroundStyle(.primary) }
