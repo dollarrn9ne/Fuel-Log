@@ -44,7 +44,7 @@ struct MainDashboardView: View {
     @State private var mapPosition: MapCameraPosition = .automatic
     /// Zoom chosen when the pins last changed, held steady while the sheet moves.
     @State private var fittedSpan: MKCoordinateSpan?
-    @State private var sheetDetent: PresentationDetent = .fraction(0.35)
+    @State private var sheetDetent: PresentationDetent = .fraction(0.38)
     @State private var selectedLogTab: LogTabChoice = .fuel
     @StateObject private var locationManager = CurrentLocationManager()
     @State private var isMapReady = false
@@ -297,8 +297,8 @@ struct MainDashboardView: View {
     @ViewBuilder
     private func bottomSheetContent(_ proxy: GeometryProxy) -> some View {
         DashboardSheetContent(colorScheme: _colorScheme, vehicle: vehicle, allVehicles: allVehicles, events: timelineEvents, onSelectVehicle: onSelectVehicle, newReportMonth: newReportMonth, onAcknowledgeReport: onAcknowledgeReport, selectedLogTab: $selectedLogTab, sheetDetent: $sheetDetent, clusterWidth: trailingClusterWidth(proxy), relocatedIconsTopPadding: relocatedIconsTopPadding(), showingAddFillUp: $showingAddFillUp, fillUpEntryMode: $fillUpEntryMode, showingAddService: $showingAddService, showingTrips: $showingTrips, showingSettings: $showingSettings, showingArchivedVehicles: $showingArchivedVehicles, showingAddVehicle: $showingAddVehicle, showingDeleteConfirmation: $showingDeleteConfirmation, showingCharts: $showingCharts, showingMonthlyReport: $showingMonthlyReport, monthlyReportMonth: $monthlyReportMonth, eventToEdit: $eventToEdit, vehicleToEdit: $vehicleToEdit)
-            .presentationDetents([.fraction(0.35), .large], selection: $sheetDetent)
-            .presentationDragIndicator(.visible).presentationBackgroundInteraction(.enabled(upThrough: .fraction(0.35))).interactiveDismissDisabled()
+            .presentationDetents([.fraction(0.38), .large], selection: $sheetDetent)
+            .presentationDragIndicator(.visible).presentationBackgroundInteraction(.enabled(upThrough: .fraction(0.38))).interactiveDismissDisabled()
             .presentationBackground { panelBackground(in: Rectangle()) }
     }
 
@@ -327,7 +327,7 @@ struct MainDashboardView: View {
     }
 
     /// The smallest detent offered, and the app's default.
-    private static let smallestSheetFraction: CGFloat = 0.35
+    private static let smallestSheetFraction: CGFloat = 0.38
     /// The tallest detent the map still pans for. Beyond this so little map is
     /// left that panning is skipped, so it doesn't constrain the zoom.
     private static let tallestPannedSheetFraction: CGFloat = 0.65
@@ -1056,11 +1056,25 @@ struct DashboardSheetContent: View {
     }
 
     /// The `relocatedIconsTopPadding` value to use absent any extra
-    /// clearance need - matches headerBar's own `.padding(.top, 24)`, so the
-    /// column's top edge lines up with the vehicle name's top edge. Also
-    /// this view's default for that parameter, and the floor
-    /// MainDashboardView.relocatedIconsTopPadding(_:) never goes below.
-    static let relocatedIconColumnBaselineTopPadding: CGFloat = 24
+    /// clearance need. Also this view's default for that parameter, and the
+    /// floor MainDashboardView.relocatedIconsTopPadding(_:) never goes
+    /// below.
+    ///
+    /// Centres the icon column vertically within the small detent's pill,
+    /// rather than matching headerBar's own top padding the way it used to:
+    /// confirmed on-device the column sitting flush with the header's own
+    /// top read as too close to the top with a lot of dead space below it.
+    /// This value converged over repeated on-device measurements rather
+    /// than from arithmetic alone: raising this constant by X only ever
+    /// produced about half of X in real measured top-margin movement, so a
+    /// single arithmetic correction undershot. History at the pill's
+    /// current (post-raise) height of 275.7pt: 32 (arithmetic centre,
+    /// (275.7-212)/2 - measured top/bottom margins 27.0/36.7, 9.7pt apart)
+    /// → 37 (measured 29.4/34.3, 4.9pt apart) → 42 (this value, untested at
+    /// time of writing - verify on-device before trusting it's fully
+    /// converged, and don't assume the next correction is simply double
+    /// the remaining gap without re-measuring).
+    static let relocatedIconColumnBaselineTopPadding: CGFloat = 42
 
     /// A single icon button's own width (44pt) - see `relocatedIconRow`'s
     /// centring maths, which mirrors MainDashboardView's for the map's
@@ -1091,6 +1105,39 @@ struct DashboardSheetContent: View {
         HStack(spacing: 16) {
             vehicleMenuLabel
                 .frame(maxWidth: .infinity, alignment: .leading)
+                // When relocated, quickIconRow isn't this HStack's sibling
+                // any more - it's a separately-positioned floating column
+                // (see relocatedIconRow), so this HStack's own vertical
+                // centering no longer does anything to align the two. The
+                // label's own text is only 26.3pt tall against the icon
+                // column's 44pt-tall circles, so matching their *tops*
+                // leaves the label's visual centre sitting ~9pt higher than
+                // the icons' - the extra +9 beyond matching the icon
+                // column's own baseline padding is what centres them
+                // instead. Computed from relocatedIconColumnBaselineTopPadding
+                // (not a second hardcoded literal) because they're coupled:
+                // confirmed on-device that this label and the icon column
+                // track each other's coded padding values closely (within
+                // ~1pt) even though neither tracks its own *coded* value
+                // precisely against the sheet's measured frame - whatever
+                // unexplained gap affects one affects the other the same
+                // way, so matching them to each other is reliable even
+                // when matching either to an absolute target isn't.
+                //
+                // .offset, not .padding(.top:) - a first attempt used
+                // padding, which pushed the visible text down correctly but
+                // also grew headerBar's own measured height by the same
+                // amount (padding adds to a view's layout size, which an
+                // HStack's sibling rows - here, every row in the ScrollView
+                // below - then have to flow around). That silently pushed
+                // "View Trends & Charts" back off the bottom of the pill,
+                // reintroducing the exact cutoff the small-pill-height fix
+                // above was for, confirmed on-device. offset repositions
+                // the rendered content without changing the space it
+                // reserves, so nothing downstream moves.
+                .offset(y: iconRowIsRelocated
+                    ? DashboardSheetContent.relocatedIconColumnBaselineTopPadding - 24 + 9
+                    : 0)
             if !iconRowIsRelocated {
                 quickIconRow
             }
