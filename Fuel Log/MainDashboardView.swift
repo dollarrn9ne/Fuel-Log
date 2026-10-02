@@ -26,6 +26,28 @@ import AppIntents
 import LocalAuthentication
 import FuelLogShared
 
+/// Bridges `View.onHingeChange(isEnabled:_:)` (iOS 27.1+) into a plain Bool
+/// binding, so `MainDashboardView` itself doesn't have to store the real
+/// `DeviceHingeContext`/`DeviceHinge.Status` types - those aren't available
+/// pre-27.1, and this app's deployment target is 26.2. A no-op on older
+/// OSes: `isPartiallyOpen` just never flips from its `false` default, so the
+/// side panel stays in its normal trailing-docked position.
+private struct HingeTracker: ViewModifier {
+    @Binding var isPartiallyOpen: Bool
+
+    func body(content: Content) -> some View {
+        if #available(iOS 27.1, *) {
+            content.onHingeChange(isEnabled: true) { _, new in
+                withAnimation(MainDashboardView.layoutChangeAnimation) {
+                    isPartiallyOpen = new.hinge?.status == .partiallyOpen
+                }
+            }
+        } else {
+            content
+        }
+    }
+}
+
 // MARK: - Main Dashboard
 struct MainDashboardView: View {
     @Environment(\.colorScheme) var colorScheme
@@ -51,6 +73,12 @@ struct MainDashboardView: View {
     @StateObject private var menuCommands = MenuCommandBus.shared
     @ObservedObject private var quickActionManager = QuickActionManager.shared
     @State private var layoutMode: DashboardLayout = .bottomSheet
+    /// Whether Duo's hinge is half-open ("book" mode) rather than closed or
+    /// fully flat - drives the side panel sliding toward the hinge instead of
+    /// staying docked at the trailing edge. A plain Bool, not the real
+    /// `DeviceHinge.Status` (iOS 27.1+, see `HingeTracker` below): storing
+    /// that type here would make this whole view unavailable pre-27.1.
+    @State private var hingeIsPartiallyOpen = false
     /// Settled height of the portrait card, as a fraction of the screen.
     @State private var cardHeightFraction: CGFloat = 0.34
 
@@ -316,10 +344,33 @@ struct MainDashboardView: View {
     /// enough map beside it to still be worth looking at. Sits between iPad
     /// portrait (1024pt, card) and iPad mini landscape (1133pt, panel).
     private static let sidePanelMinimumWidth: CGFloat = 1080
+    /// Same idea, but for Duo's unfolded inner display specifically -
+    /// comfortably under `sidePanelMinimumWidth` (tuned for iPad's much
+    /// larger range of window sizes), so a straight reuse of that threshold
+    /// left Duo's inner display on the card instead of the panel the user
+    /// actually wanted there. Not just a lower `sidePanelMinimumWidth` for
+    /// everyone - that would also pull in any iPad window between this and
+    /// 1080pt wide (e.g. certain Split View widths), a behaviour change for
+    /// iPad nobody asked for.
+    ///
+    /// 840, not a number closer to 951 (the window's full/raw size reported
+    /// by the device destination): confirmed via a temporary on-screen
+    /// debug overlay (device-interaction screenshots of this exact state
+    /// kept coming back solid black, so a visible overlay the user could
+    /// screenshot normally was the only reliable way to check) that
+    /// `proxy.size.width` - the value `layout(_:)` actually compares against
+    /// - measures 867pt here, not 951pt. The ~84pt gap is the same reserved
+    /// trailing safe-area column seen on the *outer* display
+    /// (`trailingClusterWidth`), apparently still carved out of `proxy.size`
+    /// on the unfolded inner display too. An earlier version of this
+    /// constant (900) was calibrated against the wrong (raw window) number
+    /// and so never actually cleared 867, silently keeping the old
+    /// `.bottomPanel` behaviour despite looking correct on paper.
+    private static let duoSidePanelMinimumWidth: CGFloat = 840
     /// Extra shrink required to give the side panel up once it's shown, so a
     /// window parked on the threshold doesn't flicker between layouts.
     private static let layoutSwitchHysteresis: CGFloat = 60
-    private static let layoutChangeAnimation: Animation = .smooth(duration: 0.3)
+    fileprivate static let layoutChangeAnimation: Animation = .smooth(duration: 0.3)
 
     /// Which arrangement suits the window.
     ///
@@ -333,9 +384,13 @@ struct MainDashboardView: View {
     /// kept for iPhone, where its detents are tuned and the shape is right.
     ///
     /// An unfolded Duo reports a regular horizontal size class while its idiom
-    /// stays `.phone`, so it's let through here too - it lands on the card
-    /// (`.bottomPanel`) below rather than the sheet, same as a compact-width
-    /// iPad window does.
+    /// stays `.phone`, so it's let through here too - it lands on the same
+    /// panel-vs-card choice below as iPad, just measured against
+    /// `duoSidePanelMinimumWidth` instead of iPad's own threshold (Duo's
+    /// inner display, 951pt wide, clears that lower bar and lands on the
+    /// side panel - the user explicitly wants Duo's inner display to read as
+    /// the full docked panel, not the card iPad itself falls back to below
+    /// its own, much higher, threshold).
     ///
     /// The panel-vs-card choice is width, not the aspect ratio it once compared.
     /// Aspect flipped a near-square window on a tiny drag, and near-square is
@@ -352,9 +407,12 @@ struct MainDashboardView: View {
         // that used to flicker on a near-square drag - real portrait/landscape
         // aspects aren't anywhere near that boundary.
         guard proxy.size.width > proxy.size.height else { return .bottomPanel }
+        let minimumSidePanelWidth = UIDevice.current.userInterfaceIdiom == .pad
+            ? Self.sidePanelMinimumWidth
+            : Self.duoSidePanelMinimumWidth
         let threshold = layoutMode == .sidePanel
-            ? Self.sidePanelMinimumWidth - Self.layoutSwitchHysteresis
-            : Self.sidePanelMinimumWidth
+            ? minimumSidePanelWidth - Self.layoutSwitchHysteresis
+            : minimumSidePanelWidth
         return proxy.size.width >= threshold ? .sidePanel : .bottomPanel
     }
 
@@ -389,6 +447,29 @@ struct MainDashboardView: View {
     /// on every gesture update, and re-framing the camera that often made the
     /// whole screen jitter.
     private static let panelWidth: CGFloat = 420
+    /// Same idea, but narrower for Duo's unfolded inner display specifically -
+    /// at the iPad width, the panel's own leading edge landed ~28pt past the
+    /// physical hinge, into the left half of the unfolded display (confirmed
+    /// on-device from a user screenshot). iPad has no hinge to worry about,
+    /// so this doesn't touch `panelWidth` itself - only Duo's own call sites
+    /// (via `panelWidth(_:)` below) pick this one instead.
+    ///
+    /// 340, not the 370 that first cleared the hinge: confirmed on-device
+    /// that 370 left only ~21pt of clearance past the hinge - technically
+    /// clear, but still read as "close to the hinge" in a screenshot. 340
+    /// roughly doubles that margin.
+    ///
+    /// 346, not 340: closes the gap to the icon column by a few points
+    /// (the icons themselves can't move - they're pinned to line up with
+    /// the true status-bar column above them) while staying well clear of
+    /// the hinge margin above.
+    private static let duoPanelWidth: CGFloat = 346
+
+    /// Which of the two width constants above applies, based on idiom - see
+    /// `duoPanelWidth`'s own comment for why Duo needs a narrower one.
+    private func panelWidth(_ proxy: GeometryProxy) -> CGFloat {
+        UIDevice.current.userInterfaceIdiom == .pad ? Self.panelWidth : Self.duoPanelWidth
+    }
 
     var body: some View {
         GeometryReader { proxy in
@@ -418,7 +499,7 @@ struct MainDashboardView: View {
                               // Beside the map, the panel occludes the trailing edge
                               // rather than the bottom, so the attribution and the
                               // camera both need the inset over there instead.
-                              trailingPadding: layout(proxy) == .sidePanel ? Self.panelWidth : 0,
+                              trailingPadding: layout(proxy) == .sidePanel ? panelWidth(proxy) : 0,
                               onCameraChange: { region in
                     adoptUserZoom(region.span)
                 })
@@ -429,7 +510,15 @@ struct MainDashboardView: View {
                     .sheet(item: $mapEventToView) { ev in RecordReadOnlyDetailView(event: ev) }
             }
             
-            mapControlsOverlay(proxy)
+            // Side panel gets its own consolidated copy of these controls
+            // instead (see sidePanelIconColumn, added as a *later* .overlay
+            // below, on top of sidePanel's own - nesting it in here would
+            // draw it underneath the panel instead, since .overlay always
+            // draws on top of everything already inside the view it's
+            // chained onto, regardless of sibling order within that view).
+            if layout(proxy) != .sidePanel {
+                mapControlsOverlay(proxy)
+            }
         }
         .onAppear {
             locationManager.requestLocation()
@@ -463,11 +552,21 @@ struct MainDashboardView: View {
         // Mirrored into state as well, so the camera maths doesn't need the proxy
         // threaded through every call.
         .overlay(alignment: .trailing) {
-            if layout(proxy) == .sidePanel { sidePanel }
+            if layout(proxy) == .sidePanel { sidePanel(proxy) }
+        }
+        // A separate, later .overlay than sidePanel's own above - each
+        // .overlay draws on top of everything before it (including a prior
+        // .overlay), which is what actually puts these icons on top of the
+        // panel instead of underneath it. Confirmed on-device: nesting this
+        // inside the same ZStack sidePanel's content lives in, earlier,
+        // left it drawn first and so painted over by the panel.
+        .overlay(alignment: .trailing) {
+            if layout(proxy) == .sidePanel { sidePanelIconColumn(proxy) }
         }
         .overlay(alignment: .bottomLeading) {
             if layout(proxy) == .bottomPanel { bottomPanel(proxy) }
         }
+        .modifier(HingeTracker(isPartiallyOpen: $hingeIsPartiallyOpen))
         .onAppear { layoutMode = layout(proxy) }
         .onChange(of: layout(proxy)) { _, mode in
             // Animated so a resize crossing the threshold reads as the panel
@@ -534,20 +633,186 @@ struct MainDashboardView: View {
     /// new zoom is warranted.
     /// Full-height panel pinned to the trailing edge. Nothing is hidden behind a
     /// detent here, so every row is reachable by scrolling.
-    private var sidePanel: some View {
-        DashboardSheetContent(colorScheme: _colorScheme, vehicle: vehicle, allVehicles: allVehicles, events: timelineEvents, onSelectVehicle: onSelectVehicle, newReportMonth: newReportMonth, onAcknowledgeReport: onAcknowledgeReport, selectedLogTab: $selectedLogTab, sheetDetent: .constant(.large), showingAddFillUp: $showingAddFillUp, fillUpEntryMode: $fillUpEntryMode, showingAddService: $showingAddService, showingTrips: $showingTrips, showingSettings: $showingSettings, showingArchivedVehicles: $showingArchivedVehicles, showingAddVehicle: $showingAddVehicle, showingDeleteConfirmation: $showingDeleteConfirmation, showingCharts: $showingCharts, showingMonthlyReport: $showingMonthlyReport, monthlyReportMonth: $monthlyReportMonth, eventToEdit: $eventToEdit, vehicleToEdit: $vehicleToEdit)
-            .frame(width: Self.panelWidth)
+    ///
+    /// Extended all the way to the true trailing edge (past the reserved
+    /// control column Duo's unfolded inner display still carves out of
+    /// `proxy.size`, same as its outer display does) rather than stopping at
+    /// the safe area boundary the way this panel originally did for iPad -
+    /// on-device, that left a visible gap of bare map between the panel's
+    /// own trailing edge and the true screen edge, with the map's
+    /// globe/locate buttons floating alone in it. Requested directly: the
+    /// panel should fill that gap, and the controls that used to float in
+    /// it (globe, locate) should live inside the panel instead, alongside
+    /// the header's own quick-action icons - all six consolidated into one
+    /// vertical column in this extended strip, rather than two separate
+    /// clusters (one inline in the header, one floating over the map).
+    ///
+    /// The panel's own content stays at its original `panelWidth` - only the
+    /// *background* extends into the reserved column, leading-aligned so
+    /// the extra width is added on the trailing side only (a background
+    /// wider than its view centres by default, which would've pushed half
+    /// the extra width onto the *leading* side instead, misaligning it with
+    /// the content sitting in front of it).
+    ///
+    /// The consolidated icon column itself (globe/locate plus the header's
+    /// quick-action icons) is NOT nested inside this view - see
+    /// `sidePanelIconColumn(_:)`, rendered as its own sibling at the body
+    /// level instead, for why nesting it here doesn't reliably reach the
+    /// true trailing edge the same way.
+    /// The panel's leading edge, in `proxy.size`-space: flush against the
+    /// physical hinge in "book" mode (Duo's hinge half-open rather than
+    /// closed or fully flat - see `HingeTracker`), or its normal
+    /// trailing-docked position otherwise. Centring the panel *on* the hinge
+    /// was tried first and confirmed on-device that it straddled both
+    /// displays, which read as the panel still being pinned across the seam
+    /// rather than having moved - it needs to stay entirely on the display
+    /// it already lives on, just sliding over to meet the hinge instead of
+    /// the true trailing edge.
+    ///
+    /// The hinge sits at the midpoint of the *raw* width, not `proxy.size`'s
+    /// (that excludes the reserved trailing column - see
+    /// `trailingClusterWidth`'s own comment), so it's added back in just for
+    /// this calculation.
+    private func panelLeadingEdge(_ proxy: GeometryProxy) -> CGFloat {
+        guard hingeIsPartiallyOpen else { return proxy.size.width - panelWidth(proxy) }
+        return (proxy.size.width + trailingClusterWidth(proxy)) / 2
+    }
+
+    /// The content's displayed width: normally `panelWidth(_:)`, but wider
+    /// in "book" mode to actually use the extra room gained by the leading
+    /// edge moving to the hinge, rather than leaving it as empty glass
+    /// between the content and the icon column. Trailing-aligned like the
+    /// content itself, so its right edge always lands at `proxy.size.width`
+    /// - identical to the docked case - regardless of mode; only the
+    /// leading edge differs, which is what makes this naturally land at
+    /// `panelLeadingEdge(_:)` without a separate offset.
+    private func panelContentWidth(_ proxy: GeometryProxy) -> CGFloat {
+        proxy.size.width - panelLeadingEdge(proxy)
+    }
+
+    private func sidePanel(_ proxy: GeometryProxy) -> some View {
+        DashboardSheetContent(colorScheme: _colorScheme, vehicle: vehicle, allVehicles: allVehicles, events: timelineEvents, onSelectVehicle: onSelectVehicle, newReportMonth: newReportMonth, onAcknowledgeReport: onAcknowledgeReport, selectedLogTab: $selectedLogTab, sheetDetent: .constant(.large), hidesInlineIcons: true, showingAddFillUp: $showingAddFillUp, fillUpEntryMode: $fillUpEntryMode, showingAddService: $showingAddService, showingTrips: $showingTrips, showingSettings: $showingSettings, showingArchivedVehicles: $showingArchivedVehicles, showingAddVehicle: $showingAddVehicle, showingDeleteConfirmation: $showingDeleteConfirmation, showingCharts: $showingCharts, showingMonthlyReport: $showingMonthlyReport, monthlyReportMonth: $monthlyReportMonth, eventToEdit: $eventToEdit, vehicleToEdit: $vehicleToEdit)
+            .frame(width: panelContentWidth(proxy))
             .frame(maxHeight: .infinity)
-            .background {
-                // Only the glass runs to the top and bottom edges. Letting the
-                // whole panel ignore the safe area would slide the header under
-                // the status bar, but leaving the background inside it stranded
-                // a strip of map above and below, so the panel looked clipped.
+            .background(alignment: .leading) {
+                // Only the glass runs to the screen edges, not the content -
+                // letting the whole panel ignore the safe area would slide
+                // the header text under the status bar, but leaving the
+                // background inside it stranded a visible strip of map
+                // above, below, and trailing, so the panel looked clipped.
+                //
+                // One ignoresSafeArea call for all three edges, not two
+                // separate calls (one for .vertical, one for .container
+                // .trailing, as an earlier version had) - confirmed
+                // on-device that chaining two separate calls left a gap
+                // between the panel's top and the true top of the screen,
+                // as if the vertical one hadn't actually applied; combining
+                // every edge into one call is what actually reaches all of
+                // them, not just the last one called.
+                // Always stretches from the panel's current leading edge
+                // (hinge or docked, see `panelLeadingEdge(_:)`) out to the
+                // true trailing edge - requested directly: in "book" mode
+                // the panel should still reach over and attach to the icon
+                // column, the same way it does fully open, rather than
+                // floating as a detached card. An earlier version gave
+                // "book" mode its own fully-rounded, content-width-only
+                // background instead of this; confirmed on-device that left
+                // a visible gap of bare map between the panel and the icon
+                // column, floating disconnected from anything.
                 panelBackground(in: UnevenRoundedRectangle(topLeadingRadius: 28, bottomLeadingRadius: 28, style: .continuous), frosted: true)
-                    .ignoresSafeArea(edges: .vertical)
+                    .frame(width: proxy.size.width + trailingClusterWidth(proxy) - panelLeadingEdge(proxy))
+                    .ignoresSafeArea(.container, edges: [.top, .bottom, .trailing])
             }
             .transition(.move(edge: .trailing))
     }
+
+    /// The six controls that used to be two separate clusters - the map's
+    /// own floating globe/locate buttons, and the side panel header's
+    /// quick-action icons - consolidated into one vertical column, in the
+    /// same reserved trailing column `mapControlsOverlay` already centres
+    /// its own buttons within on Duo's *outer* display. Requested directly:
+    /// since the panel now extends into that column (see `sidePanel(_:)`),
+    /// a separately-floated copy of the map buttons would render underneath
+    /// it, unreachable - and the header's own icons need to come out of the
+    /// header for the same reason `hidesInlineIcons` exists.
+    ///
+    /// A top-level ZStack sibling (alongside `mapControlsOverlay`), not
+    /// nested inside `sidePanel(_:)`'s own returned view, for the same
+    /// reason `relocatedIconRow` on Duo's outer display isn't nested inside
+    /// `DashboardSheetContent`'s own content VStack either: nesting it
+    /// inside a view that's itself constrained to `panelWidth` would only
+    /// ever get proposed that same constrained width to lay out in, leaving
+    /// `ignoresSafeArea` nothing beyond it to reach past. As a sibling of
+    /// the full-screen ZStack in `body` instead, it's proposed the whole
+    /// screen's width, which is what lets it reach the true trailing edge.
+    ///
+    /// Builds its own `DashboardSheetContent` value purely to read
+    /// `quickIconColumn` off it - a second *value* (cheap; a plain
+    /// description of a view, not a second live instance of anything), not
+    /// a second rendering of the panel itself.
+    ///
+    /// Two separate groups, not one combined column - matching Duo's
+    /// *outer* display, where the map's globe/locate buttons stay pinned
+    /// near the status-bar cluster while the header's quick-action icons
+    /// sit at their own fixed position further down. An earlier version
+    /// stacked all six in one column near the top; confirmed on-device that
+    /// put the first icon (globe) directly behind the status bar's own
+    /// time/wifi content - this view ignoresSafeArea to reach the trailing
+    /// edge, which (with no explicit top inset of its own) also let it
+    /// reach above the top safe area inset the status bar occupies.
+    /// `topGroupClearance` pushes the top group below that; the bottom
+    /// group uses a `Spacer()` to anchor near the bottom instead, with its
+    /// own small margin.
+    private func sidePanelIconColumn(_ proxy: GeometryProxy) -> some View {
+        let content = DashboardSheetContent(colorScheme: _colorScheme, vehicle: vehicle, allVehicles: allVehicles, events: timelineEvents, onSelectVehicle: onSelectVehicle, newReportMonth: newReportMonth, onAcknowledgeReport: onAcknowledgeReport, selectedLogTab: $selectedLogTab, sheetDetent: .constant(.large), hidesInlineIcons: true, showingAddFillUp: $showingAddFillUp, fillUpEntryMode: $fillUpEntryMode, showingAddService: $showingAddService, showingTrips: $showingTrips, showingSettings: $showingSettings, showingArchivedVehicles: $showingArchivedVehicles, showingAddVehicle: $showingAddVehicle, showingDeleteConfirmation: $showingDeleteConfirmation, showingCharts: $showingCharts, showingMonthlyReport: $showingMonthlyReport, monthlyReportMonth: $monthlyReportMonth, eventToEdit: $eventToEdit, vehicleToEdit: $vehicleToEdit)
+        // Centred within the reserved column, plus the same
+        // reservedColumnRightMargin correction as the outer display's
+        // version of this math - a left-hugging formula was tried here to
+        // close up the gap to the panel's own content, but confirmed
+        // on-device that it put the globe/locate buttons ~13pt further
+        // left than the true status-bar column above them (visibly
+        // misaligned, since this reserved column is this display's actual
+        // status-bar strip, not a free-floating hardware cluster like the
+        // outer display's). Centring is what lines them up.
+        let trailingPadding = max(0, (trailingClusterWidth(proxy) - Self.mapControlButtonDiameter) / 2 + Self.reservedColumnRightMargin)
+        return VStack(spacing: 0) {
+            HStack {
+                Spacer()
+                VStack(spacing: 12) {
+                    if colorScheme != .dark {
+                        mapControlButton(systemImage: useSatellite ? "map.fill" : "globe.americas.fill") { useSatellite.toggle() }
+                    }
+                    mapControlButton(systemImage: "location.fill") {
+                        if let loc = locationManager.location { withAnimation(.easeInOut(duration: 0.5)) { mapPosition = .region(MKCoordinateRegion(center: loc.coordinate, latitudinalMeters: 1000, longitudinalMeters: 1000)) } } else {
+                            locationManager.onLocationUpdate = { loc in withAnimation(.easeInOut(duration: 0.5)) { mapPosition = .region(MKCoordinateRegion(center: loc.coordinate, latitudinalMeters: 1000, longitudinalMeters: 1000)) }; locationManager.onLocationUpdate = nil }
+                            locationManager.requestLocation()
+                        }
+                    }
+                }
+                .padding(.top, Self.sidePanelTopGroupClearance)
+                .padding(.trailing, trailingPadding)
+            }
+            Spacer()
+            HStack {
+                Spacer()
+                content.quickIconColumn
+                    .padding(.bottom, 32)
+                    .padding(.trailing, trailingPadding)
+            }
+        }
+        .ignoresSafeArea(.container, edges: .trailing)
+    }
+
+    /// How far below the true top edge the globe/locate buttons need to sit
+    /// to clear Duo's unfolded inner display's own (normal, horizontal)
+    /// status bar - calibrated from a user screenshot showing the globe
+    /// button's icon rendering directly behind the status bar's time/wifi
+    /// content at the previous value (24pt, nowhere near enough). Unlike
+    /// the outer display's reserved column, this is an ordinary top status
+    /// bar, not a special hardware cluster - the number is just taller than
+    /// a typical safe-area top inset because Duo's unfolded status bar
+    /// itself is taller than a normal iPhone's.
+    private static let sidePanelTopGroupClearance: CGFloat = 130
 
     /// The treatment `presentationBackground` gives the sheet, so the hand-built
     /// panels match it. `.regularMaterial` was far more opaque than the sheet's
@@ -795,6 +1060,12 @@ struct DashboardSheetContent: View {
     /// than measured locally, since the parent already has to compute it for
     /// the map controls and the card's own width.
     var clusterWidth: CGFloat = 0
+    /// True for the side panel only: MainDashboardView.sidePanel renders its
+    /// own copy of `quickIconColumn` (pulled directly off a second instance
+    /// of this view, alongside the map's globe/locate buttons) in the
+    /// panel's extended trailing strip, so this view's own header shouldn't
+    /// also render them inline - they'd otherwise show up twice.
+    var hidesInlineIcons: Bool = false
 
     /// Owned by MainDashboardView, not here: this view is rebuilt from scratch
     /// whenever an iPad rotation crosses the side-panel/bottom-panel width
@@ -1129,7 +1400,7 @@ struct DashboardSheetContent: View {
                 // the rendered content without changing the space it
                 // reserves, so nothing downstream moves.
                 .offset(y: iconRowIsRelocated ? 9 : 0)
-            if !iconRowIsRelocated {
+            if !iconRowIsRelocated && !hidesInlineIcons {
                 quickIconRow
             }
         }
@@ -1251,10 +1522,13 @@ struct DashboardSheetContent: View {
         HStack(spacing: 12) { quickIconButtons }
     }
 
-    /// Same 4 buttons stacked vertically instead of in a row - used only by
-    /// `relocatedIconRow`, matching the vertical column the system uses for
-    /// its own status/toolbar icons on Duo's outer display.
-    private var quickIconColumn: some View {
+    /// Same 4 buttons stacked vertically instead of in a row - used by
+    /// `relocatedIconRow` (matching the vertical column the system uses for
+    /// its own status/toolbar icons on Duo's outer display) and, via a
+    /// second `DashboardSheetContent` instance built just to read this one
+    /// property off of, by `MainDashboardView.sidePanel` for Duo's unfolded
+    /// inner display - not `private` for that second case.
+    var quickIconColumn: some View {
         VStack(spacing: 12) { quickIconButtons }
     }
 
