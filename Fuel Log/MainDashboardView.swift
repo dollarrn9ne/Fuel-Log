@@ -265,38 +265,41 @@ struct MainDashboardView: View {
     /// worth further cycles right now; the icons that need to clear the
     /// column live in relocatedIconRow instead, positioned independently
     /// of whatever width this pill has.
-    /// Extra top padding so the relocated icon column clears Duo's status
-    /// bar column instead of rendering behind it. Confirmed on-device: at
-    /// the large detent the sheet's own top edge sits close to the true
-    /// screen top (well inside the status cluster's ~165pt height), so
-    /// pinning the column to a fixed header-relative offset (right for the
-    /// small detent, where the sheet sits well below the cluster already)
-    /// put its first 1-2 icons underneath the cluster, hidden.
+    /// The vertical offset (see relocatedIconRow) that lands the relocated
+    /// icon column at the same fixed absolute screen position at every
+    /// detent, rather than a position computed fresh per detent. Earlier
+    /// versions computed clearance below Duo's status-bar cluster
+    /// specifically for the large detent (where the sheet's own top sits
+    /// right under it) and a separately-tuned centring value for the small
+    /// detent - functionally correct at each detent individually, but the
+    /// user explicitly wants the column to visibly *not move* when the
+    /// sheet is raised, which a per-detent calculation can't give even when
+    /// each one is individually well-tuned. A single fixed target,
+    /// converted to this detent's own offset by subtracting its sheet-top
+    /// position, automatically clears the status-bar cluster too: the
+    /// small-pill-centred target (~426) is already well below the cluster
+    /// (~165), so it stays clear at the large detent without needing that
+    /// case's own special handling at all.
     ///
-    /// Only clears the cluster itself here - NOT the map's globe/locate
-    /// buttons further below it. An earlier version targeted aligning under
-    /// those too, which meant chasing their position even once the sheet
-    /// covers them entirely (they don't exist in the hierarchy by the large
-    /// detent), reserving space for an alignment nobody could see. This is
-    /// deliberately the smaller of the two asks.
-    private func relocatedIconsTopPadding() -> CGFloat {
-        // sheetFraction * fullHeight is the approximation the map-panning
-        // maths uses elsewhere, where being off by a little is fine - here
-        // it isn't. Confirmed on-device (comparing this formula's estimate
-        // against the icon column's actual measured position) that at the
-        // large detent it under-estimates the sheet's real top by ~46pt
-        // (formula: ~54pt; real: ~8pt), which under-cleared the cluster and
-        // left the topmost ("+") icon rendered behind it instead of below.
-        // These two values are calibrated directly from on-device
-        // measurement instead.
-        let sheetTopY: CGFloat = sheetDetent == .large ? 8 : 413
-        let clusterClearance = max(0, Self.trailingClusterHeightEstimate - sheetTopY)
-        return max(DashboardSheetContent.relocatedIconColumnBaselineTopPadding, clusterClearance)
+    /// sheetTopY values are calibrated directly from on-device measurement
+    /// (not the sheetFraction/fullHeight approximation used for the
+    /// map-panning maths elsewhere, which is off by tens of points at
+    /// these detents - see this function's git history for specifics).
+    private func relocatedIconsTopOffset() -> CGFloat {
+        let sheetTopY: CGFloat = sheetDetent == .large ? 8 : 394
+        return Self.relocatedIconTargetAbsoluteY - sheetTopY
     }
+
+    /// The fixed absolute screen position (see relocatedIconsTopOffset())
+    /// the icon column always targets, matching where it already sat
+    /// (vertically centred) in the small pill before this fixed-position
+    /// behaviour existed - confirm the large detent lands here too on any
+    /// future change, not just the small one.
+    private static let relocatedIconTargetAbsoluteY: CGFloat = 426
 
     @ViewBuilder
     private func bottomSheetContent(_ proxy: GeometryProxy) -> some View {
-        DashboardSheetContent(colorScheme: _colorScheme, vehicle: vehicle, allVehicles: allVehicles, events: timelineEvents, onSelectVehicle: onSelectVehicle, newReportMonth: newReportMonth, onAcknowledgeReport: onAcknowledgeReport, selectedLogTab: $selectedLogTab, sheetDetent: $sheetDetent, clusterWidth: trailingClusterWidth(proxy), relocatedIconsTopPadding: relocatedIconsTopPadding(), showingAddFillUp: $showingAddFillUp, fillUpEntryMode: $fillUpEntryMode, showingAddService: $showingAddService, showingTrips: $showingTrips, showingSettings: $showingSettings, showingArchivedVehicles: $showingArchivedVehicles, showingAddVehicle: $showingAddVehicle, showingDeleteConfirmation: $showingDeleteConfirmation, showingCharts: $showingCharts, showingMonthlyReport: $showingMonthlyReport, monthlyReportMonth: $monthlyReportMonth, eventToEdit: $eventToEdit, vehicleToEdit: $vehicleToEdit)
+        DashboardSheetContent(colorScheme: _colorScheme, vehicle: vehicle, allVehicles: allVehicles, events: timelineEvents, onSelectVehicle: onSelectVehicle, newReportMonth: newReportMonth, onAcknowledgeReport: onAcknowledgeReport, selectedLogTab: $selectedLogTab, sheetDetent: $sheetDetent, clusterWidth: trailingClusterWidth(proxy), relocatedIconsTopOffset: relocatedIconsTopOffset(), showingAddFillUp: $showingAddFillUp, fillUpEntryMode: $fillUpEntryMode, showingAddService: $showingAddService, showingTrips: $showingTrips, showingSettings: $showingSettings, showingArchivedVehicles: $showingArchivedVehicles, showingAddVehicle: $showingAddVehicle, showingDeleteConfirmation: $showingDeleteConfirmation, showingCharts: $showingCharts, showingMonthlyReport: $showingMonthlyReport, monthlyReportMonth: $monthlyReportMonth, eventToEdit: $eventToEdit, vehicleToEdit: $vehicleToEdit)
             .presentationDetents([.fraction(0.38), .large], selection: $sheetDetent)
             .presentationDragIndicator(.visible).presentationBackgroundInteraction(.enabled(upThrough: .fraction(0.38))).interactiveDismissDisabled()
             .presentationBackground { panelBackground(in: Rectangle()) }
@@ -823,13 +826,13 @@ struct DashboardSheetContent: View {
     /// than measured locally, since the parent already has to compute it for
     /// the map controls and the card's own width.
     var clusterWidth: CGFloat = 0
-    /// Top padding relocatedIconRow needs, in this view's own local
-    /// coordinate space - see MainDashboardView.relocatedIconsTopPadding(_:),
-    /// which computes it. Not measured locally: it depends on the sheet's
-    /// own absolute screen position (to know whether the column needs extra
-    /// clearance below the status-bar cluster, or just its usual
-    /// header-aligned offset), which only the parent's GeometryProxy has.
-    var relocatedIconsTopPadding: CGFloat = DashboardSheetContent.relocatedIconColumnBaselineTopPadding
+    /// Vertical offset relocatedIconRow needs, in this view's own local
+    /// coordinate space, to land the icon column at the same fixed
+    /// absolute screen position regardless of detent - see
+    /// MainDashboardView.relocatedIconsTopOffset(), which computes it. Not
+    /// computed locally: it depends on the sheet's own current detent and
+    /// its calibrated screen position, which only the parent tracks.
+    var relocatedIconsTopOffset: CGFloat = 0
 
     /// Owned by MainDashboardView, not here: this view is rebuilt from scratch
     /// whenever an iPad rotation crosses the side-panel/bottom-panel width
@@ -1016,15 +1019,18 @@ struct DashboardSheetContent: View {
     /// always renders above its presenter. Living inside the sheet keeps
     /// these genuinely tappable at every detent.
     ///
-    /// Positioned with a small fixed top padding matching the header's own
-    /// top padding, normally matching the header's own top padding so the
-    /// column's top lines up with the vehicle name's top - except at the
-    /// large detent, where MainDashboardView.relocatedIconsTopPadding(_:)
-    /// pushes it down further so it clears the status-bar cluster instead
-    /// of rendering behind it (confirmed on-device: without that extra
-    /// clearance, the sheet's own top edge sits so close to the true screen
-    /// top at the large detent that the first 1-2 icons ended up hidden
-    /// underneath the cluster). Untied from this view's own width entirely
+    /// Positioned with `.offset`, not `.padding(.top:)` - padding changes a
+    /// view's measured layout size, which compounded unpredictably through
+    /// this column's nested Spacer/HStack/VStack scaffolding (confirmed
+    /// on-device: raising the padding value by a fixed amount only ever
+    /// moved the rendered icons by about half that amount, never 1:1, which
+    /// took several rounds of on-device re-measurement to converge). Offset
+    /// repositions the already-laid-out view without touching layout, which
+    /// maps cleanly 1:1 to the real rendered position instead - see
+    /// MainDashboardView.relocatedIconsTopOffset() for why a single offset
+    /// value (not a per-detent calculation) is also what keeps the column
+    /// at the same fixed screen position regardless of detent, which is
+    /// what this behaves as. Untied from this view's own width entirely
     /// (unlike an earlier attempt that capped a "pill" width and positioned
     /// this relative to it) - a NavigationStack + .toolbar{} version was
     /// also tried, hoping the system would place these automatically, but
@@ -1046,7 +1052,7 @@ struct DashboardSheetContent: View {
                 HStack {
                     Spacer()
                     quickIconColumn
-                        .padding(.top, relocatedIconsTopPadding)
+                        .offset(y: relocatedIconsTopOffset)
                         .padding(.trailing, max(0, (clusterWidth - Self.relocatedIconColumnWidth) / 2 + Self.reservedColumnRightMargin - Self.sheetEdgeInset))
                 }
                 Spacer()
@@ -1054,27 +1060,6 @@ struct DashboardSheetContent: View {
             .ignoresSafeArea(.container, edges: .trailing)
         }
     }
-
-    /// The `relocatedIconsTopPadding` value to use absent any extra
-    /// clearance need. Also this view's default for that parameter, and the
-    /// floor MainDashboardView.relocatedIconsTopPadding(_:) never goes
-    /// below.
-    ///
-    /// Centres the icon column vertically within the small detent's pill,
-    /// rather than matching headerBar's own top padding the way it used to:
-    /// confirmed on-device the column sitting flush with the header's own
-    /// top read as too close to the top with a lot of dead space below it.
-    /// This value converged over repeated on-device measurements rather
-    /// than from arithmetic alone: raising this constant by X only ever
-    /// produced about half of X in real measured top-margin movement, so a
-    /// single arithmetic correction undershot. History at the pill's
-    /// current (post-raise) height of 275.7pt: 32 (arithmetic centre,
-    /// (275.7-212)/2 - measured top/bottom margins 27.0/36.7, 9.7pt apart)
-    /// → 37 (measured 29.4/34.3, 4.9pt apart) → 42 (this value, untested at
-    /// time of writing - verify on-device before trusting it's fully
-    /// converged, and don't assume the next correction is simply double
-    /// the remaining gap without re-measuring).
-    static let relocatedIconColumnBaselineTopPadding: CGFloat = 42
 
     /// A single icon button's own width (44pt) - see `relocatedIconRow`'s
     /// centring maths, which mirrors MainDashboardView's for the map's
@@ -1112,17 +1097,17 @@ struct DashboardSheetContent: View {
                 // label's own text is only 26.3pt tall against the icon
                 // column's 44pt-tall circles, so matching their *tops*
                 // leaves the label's visual centre sitting ~9pt higher than
-                // the icons' - the extra +9 beyond matching the icon
-                // column's own baseline padding is what centres them
-                // instead. Computed from relocatedIconColumnBaselineTopPadding
-                // (not a second hardcoded literal) because they're coupled:
-                // confirmed on-device that this label and the icon column
-                // track each other's coded padding values closely (within
-                // ~1pt) even though neither tracks its own *coded* value
-                // precisely against the sheet's measured frame - whatever
-                // unexplained gap affects one affects the other the same
-                // way, so matching them to each other is reliable even
-                // when matching either to an absolute target isn't.
+                // the icons' - a flat +9 is what centres them instead,
+                // confirmed on-device. Not tied to the icon column's own
+                // offset (relocatedIconsTopOffset) the way an earlier
+                // version was: that offset now targets a fixed *absolute*
+                // screen position that's completely decoupled from
+                // headerBar's own (always-24) structural top padding, so
+                // there's no shared "baseline" left between the two to
+                // stay in sync with - this label's own +9 is a
+                // self-contained correction for its height difference from
+                // a 44pt circle, nothing else, and stays correct regardless
+                // of whatever the icon column's own offset is tuned to.
                 //
                 // .offset, not .padding(.top:) - a first attempt used
                 // padding, which pushed the visible text down correctly but
@@ -1135,9 +1120,7 @@ struct DashboardSheetContent: View {
                 // above was for, confirmed on-device. offset repositions
                 // the rendered content without changing the space it
                 // reserves, so nothing downstream moves.
-                .offset(y: iconRowIsRelocated
-                    ? DashboardSheetContent.relocatedIconColumnBaselineTopPadding - 24 + 9
-                    : 0)
+                .offset(y: iconRowIsRelocated ? 9 : 0)
             if !iconRowIsRelocated {
                 quickIconRow
             }
