@@ -1051,10 +1051,23 @@ struct DashboardSheetContent: View {
         }
     }
 
-    /// The fixed absolute screen position the icon column always targets,
-    /// matching where it already sat (vertically centred) in the small pill
-    /// before this fixed-position behaviour existed.
-    private static let relocatedIconTargetAbsoluteY: CGFloat = 426
+    /// The fixed absolute screen position the icon column always targets -
+    /// calibrated to sit vertically centred within the small pill
+    /// specifically (the large detent just inherits whatever this value
+    /// is, and has plenty of headroom either way).
+    ///
+    /// This is NOT derived from `smallestSheetFraction` or any other
+    /// constant - it has to be re-measured and updated by hand whenever
+    /// the small pill's own height changes, which bit once already:
+    /// raising `smallestSheetFraction` (0.38 -> 0.42, for more clearance
+    /// below "View Trends & Charts") moved the small pill's centre without
+    /// this value following it, leaving the icon column off-centre again
+    /// (measured on-device: 57pt top margin vs 32pt bottom margin - 25pt
+    /// off, not the ~0.3pt this was converged to before). Recalculated from
+    /// a fresh on-device measurement of the *current* small pill (sheet
+    /// top 369.0, height 301.0): centred top margin = 369.0 + (301.0-212)/2
+    /// = 413.5.
+    private static let relocatedIconTargetAbsoluteY: CGFloat = 413.5
 
     /// A single icon button's own width (44pt) - see `relocatedIconRow`'s
     /// centring maths, which mirrors MainDashboardView's for the map's
