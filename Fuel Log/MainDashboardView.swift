@@ -44,7 +44,7 @@ struct MainDashboardView: View {
     @State private var mapPosition: MapCameraPosition = .automatic
     /// Zoom chosen when the pins last changed, held steady while the sheet moves.
     @State private var fittedSpan: MKCoordinateSpan?
-    @State private var sheetDetent: PresentationDetent = .fraction(0.38)
+    @State private var sheetDetent: PresentationDetent = .fraction(0.42)
     @State private var selectedLogTab: LogTabChoice = .fuel
     @StateObject private var locationManager = CurrentLocationManager()
     @State private var isMapReady = false
@@ -269,8 +269,8 @@ struct MainDashboardView: View {
     @ViewBuilder
     private func bottomSheetContent(_ proxy: GeometryProxy) -> some View {
         DashboardSheetContent(colorScheme: _colorScheme, vehicle: vehicle, allVehicles: allVehicles, events: timelineEvents, onSelectVehicle: onSelectVehicle, newReportMonth: newReportMonth, onAcknowledgeReport: onAcknowledgeReport, selectedLogTab: $selectedLogTab, sheetDetent: $sheetDetent, clusterWidth: trailingClusterWidth(proxy), showingAddFillUp: $showingAddFillUp, fillUpEntryMode: $fillUpEntryMode, showingAddService: $showingAddService, showingTrips: $showingTrips, showingSettings: $showingSettings, showingArchivedVehicles: $showingArchivedVehicles, showingAddVehicle: $showingAddVehicle, showingDeleteConfirmation: $showingDeleteConfirmation, showingCharts: $showingCharts, showingMonthlyReport: $showingMonthlyReport, monthlyReportMonth: $monthlyReportMonth, eventToEdit: $eventToEdit, vehicleToEdit: $vehicleToEdit)
-            .presentationDetents([.fraction(0.38), .large], selection: $sheetDetent)
-            .presentationDragIndicator(.visible).presentationBackgroundInteraction(.enabled(upThrough: .fraction(0.38))).interactiveDismissDisabled()
+            .presentationDetents([.fraction(0.42), .large], selection: $sheetDetent)
+            .presentationDragIndicator(.visible).presentationBackgroundInteraction(.enabled(upThrough: .fraction(0.42))).interactiveDismissDisabled()
             .presentationBackground { panelBackground(in: Rectangle()) }
     }
 
@@ -299,7 +299,7 @@ struct MainDashboardView: View {
     }
 
     /// The smallest detent offered, and the app's default.
-    private static let smallestSheetFraction: CGFloat = 0.38
+    private static let smallestSheetFraction: CGFloat = 0.42
     /// The tallest detent the map still pans for. Beyond this so little map is
     /// left that panning is skipped, so it doesn't constrain the zoom.
     private static let tallestPannedSheetFraction: CGFloat = 0.65
