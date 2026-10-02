@@ -265,41 +265,10 @@ struct MainDashboardView: View {
     /// worth further cycles right now; the icons that need to clear the
     /// column live in relocatedIconRow instead, positioned independently
     /// of whatever width this pill has.
-    /// The vertical offset (see relocatedIconRow) that lands the relocated
-    /// icon column at the same fixed absolute screen position at every
-    /// detent, rather than a position computed fresh per detent. Earlier
-    /// versions computed clearance below Duo's status-bar cluster
-    /// specifically for the large detent (where the sheet's own top sits
-    /// right under it) and a separately-tuned centring value for the small
-    /// detent - functionally correct at each detent individually, but the
-    /// user explicitly wants the column to visibly *not move* when the
-    /// sheet is raised, which a per-detent calculation can't give even when
-    /// each one is individually well-tuned. A single fixed target,
-    /// converted to this detent's own offset by subtracting its sheet-top
-    /// position, automatically clears the status-bar cluster too: the
-    /// small-pill-centred target (~426) is already well below the cluster
-    /// (~165), so it stays clear at the large detent without needing that
-    /// case's own special handling at all.
-    ///
-    /// sheetTopY values are calibrated directly from on-device measurement
-    /// (not the sheetFraction/fullHeight approximation used for the
-    /// map-panning maths elsewhere, which is off by tens of points at
-    /// these detents - see this function's git history for specifics).
-    private func relocatedIconsTopOffset() -> CGFloat {
-        let sheetTopY: CGFloat = sheetDetent == .large ? 8 : 394
-        return Self.relocatedIconTargetAbsoluteY - sheetTopY
-    }
-
-    /// The fixed absolute screen position (see relocatedIconsTopOffset())
-    /// the icon column always targets, matching where it already sat
-    /// (vertically centred) in the small pill before this fixed-position
-    /// behaviour existed - confirm the large detent lands here too on any
-    /// future change, not just the small one.
-    private static let relocatedIconTargetAbsoluteY: CGFloat = 426
 
     @ViewBuilder
     private func bottomSheetContent(_ proxy: GeometryProxy) -> some View {
-        DashboardSheetContent(colorScheme: _colorScheme, vehicle: vehicle, allVehicles: allVehicles, events: timelineEvents, onSelectVehicle: onSelectVehicle, newReportMonth: newReportMonth, onAcknowledgeReport: onAcknowledgeReport, selectedLogTab: $selectedLogTab, sheetDetent: $sheetDetent, clusterWidth: trailingClusterWidth(proxy), relocatedIconsTopOffset: relocatedIconsTopOffset(), showingAddFillUp: $showingAddFillUp, fillUpEntryMode: $fillUpEntryMode, showingAddService: $showingAddService, showingTrips: $showingTrips, showingSettings: $showingSettings, showingArchivedVehicles: $showingArchivedVehicles, showingAddVehicle: $showingAddVehicle, showingDeleteConfirmation: $showingDeleteConfirmation, showingCharts: $showingCharts, showingMonthlyReport: $showingMonthlyReport, monthlyReportMonth: $monthlyReportMonth, eventToEdit: $eventToEdit, vehicleToEdit: $vehicleToEdit)
+        DashboardSheetContent(colorScheme: _colorScheme, vehicle: vehicle, allVehicles: allVehicles, events: timelineEvents, onSelectVehicle: onSelectVehicle, newReportMonth: newReportMonth, onAcknowledgeReport: onAcknowledgeReport, selectedLogTab: $selectedLogTab, sheetDetent: $sheetDetent, clusterWidth: trailingClusterWidth(proxy), showingAddFillUp: $showingAddFillUp, fillUpEntryMode: $fillUpEntryMode, showingAddService: $showingAddService, showingTrips: $showingTrips, showingSettings: $showingSettings, showingArchivedVehicles: $showingArchivedVehicles, showingAddVehicle: $showingAddVehicle, showingDeleteConfirmation: $showingDeleteConfirmation, showingCharts: $showingCharts, showingMonthlyReport: $showingMonthlyReport, monthlyReportMonth: $monthlyReportMonth, eventToEdit: $eventToEdit, vehicleToEdit: $vehicleToEdit)
             .presentationDetents([.fraction(0.38), .large], selection: $sheetDetent)
             .presentationDragIndicator(.visible).presentationBackgroundInteraction(.enabled(upThrough: .fraction(0.38))).interactiveDismissDisabled()
             .presentationBackground { panelBackground(in: Rectangle()) }
@@ -826,13 +795,6 @@ struct DashboardSheetContent: View {
     /// than measured locally, since the parent already has to compute it for
     /// the map controls and the card's own width.
     var clusterWidth: CGFloat = 0
-    /// Vertical offset relocatedIconRow needs, in this view's own local
-    /// coordinate space, to land the icon column at the same fixed
-    /// absolute screen position regardless of detent - see
-    /// MainDashboardView.relocatedIconsTopOffset(), which computes it. Not
-    /// computed locally: it depends on the sheet's own current detent and
-    /// its calibrated screen position, which only the parent tracks.
-    var relocatedIconsTopOffset: CGFloat = 0
 
     /// Owned by MainDashboardView, not here: this view is rebuilt from scratch
     /// whenever an iPad rotation crosses the side-panel/bottom-panel width
@@ -857,6 +819,22 @@ struct DashboardSheetContent: View {
     @StateObject private var sheetMenuCommands = MenuCommandBus.shared
 
     var body: some View {
+        // GeometryReader here (rather than threading a detent-based offset
+        // in from MainDashboardView, as an earlier version did) is what
+        // makes relocatedIconRow track the sheet's *actual* real-time
+        // height during an interactive drag, not just its value at the two
+        // settled detents. A detent-based offset is only correct once the
+        // drag commits to .small or .large - mid-drag, this view's own
+        // frame already resizes continuously (confirmed on-device via
+        // screen recording), but the old offset stayed pinned to whichever
+        // detent was last committed, so the icon column either drifted the
+        // wrong way through most of the drag or sat still while everything
+        // else moved, then snapped to the correct fixed position the
+        // instant the detent flipped - a visible jump/bounce. Reading this
+        // view's own live frame instead means the icon column is always
+        // computed from where the sheet *actually* is this frame, so it
+        // tracks smoothly with no separate detent-aware case needed.
+        GeometryReader { geo in
         // relocatedIconRow is a sibling of the VStack below, not nested
         // inside it via .overlay() on that view - an overlay's content is
         // proposed the base view's own resolved size, which is exactly what
@@ -939,7 +917,8 @@ struct DashboardSheetContent: View {
             }
         }
 
-        relocatedIconRow
+        relocatedIconRow(sheetTopY: geo.frame(in: .global).minY)
+        }
         }
         // Presentations for this content's own actions. Nested here rather
         // than on MainDashboardView: on iPhone this view is itself always
@@ -1026,18 +1005,29 @@ struct DashboardSheetContent: View {
     /// moved the rendered icons by about half that amount, never 1:1, which
     /// took several rounds of on-device re-measurement to converge). Offset
     /// repositions the already-laid-out view without touching layout, which
-    /// maps cleanly 1:1 to the real rendered position instead - see
-    /// MainDashboardView.relocatedIconsTopOffset() for why a single offset
-    /// value (not a per-detent calculation) is also what keeps the column
-    /// at the same fixed screen position regardless of detent, which is
-    /// what this behaves as. Untied from this view's own width entirely
-    /// (unlike an earlier attempt that capped a "pill" width and positioned
-    /// this relative to it) - a NavigationStack + .toolbar{} version was
-    /// also tried, hoping the system would place these automatically, but
-    /// it relocated them vertically only within this view's own trailing
-    /// edge, not the true hardware column - still tied to wherever this
-    /// view happened to end, which is exactly what this ignoresSafeArea
-    /// approach avoids.
+    /// maps cleanly 1:1 to the real rendered position instead.
+    ///
+    /// `sheetTopY` is this whole view's own live frame (read via
+    /// `GeometryReader` in `body`, in the `.global` coordinate space), not a
+    /// value computed from the sheet's detent - a detent-based value is
+    /// only correct once a drag settles on `.small` or `.large`; mid-drag,
+    /// this view's frame already resizes continuously, confirmed via
+    /// screen recording, but a detent-based offset stays pinned to
+    /// whichever one was last committed, so the icon column either tracked
+    /// the drag wrongly or didn't move at all, then snapped to the correct
+    /// position the instant the detent flipped - a visible jump. Reading
+    /// the live frame every layout pass instead means the fixed-target
+    /// arithmetic below (`relocatedIconTargetAbsoluteY - sheetTopY`) is
+    /// always correct for wherever the sheet actually is *this frame*, not
+    /// just at the two settled endpoints, so there's nothing to snap.
+    ///
+    /// Untied from this view's own width entirely (unlike an earlier
+    /// attempt that capped a "pill" width and positioned this relative to
+    /// it) - a NavigationStack + .toolbar{} version was also tried, hoping
+    /// the system would place these automatically, but it relocated them
+    /// vertically only within this view's own trailing edge, not the true
+    /// hardware column - still tied to wherever this view happened to end,
+    /// which is exactly what this ignoresSafeArea approach avoids.
     ///
     /// Stacked vertically (see `quickIconColumn`) rather than in a row: a
     /// single 44pt-wide column fits inside the reserved 84pt column the same
@@ -1046,13 +1036,13 @@ struct DashboardSheetContent: View {
     /// had to hang its trailing edge off the column's own trailing edge
     /// instead.
     @ViewBuilder
-    private var relocatedIconRow: some View {
+    private func relocatedIconRow(sheetTopY: CGFloat) -> some View {
         if iconRowIsRelocated {
             VStack {
                 HStack {
                     Spacer()
                     quickIconColumn
-                        .offset(y: relocatedIconsTopOffset)
+                        .offset(y: Self.relocatedIconTargetAbsoluteY - sheetTopY)
                         .padding(.trailing, max(0, (clusterWidth - Self.relocatedIconColumnWidth) / 2 + Self.reservedColumnRightMargin - Self.sheetEdgeInset))
                 }
                 Spacer()
@@ -1060,6 +1050,11 @@ struct DashboardSheetContent: View {
             .ignoresSafeArea(.container, edges: .trailing)
         }
     }
+
+    /// The fixed absolute screen position the icon column always targets,
+    /// matching where it already sat (vertically centred) in the small pill
+    /// before this fixed-position behaviour existed.
+    private static let relocatedIconTargetAbsoluteY: CGFloat = 426
 
     /// A single icon button's own width (44pt) - see `relocatedIconRow`'s
     /// centring maths, which mirrors MainDashboardView's for the map's
@@ -1099,8 +1094,8 @@ struct DashboardSheetContent: View {
                 // leaves the label's visual centre sitting ~9pt higher than
                 // the icons' - a flat +9 is what centres them instead,
                 // confirmed on-device. Not tied to the icon column's own
-                // offset (relocatedIconsTopOffset) the way an earlier
-                // version was: that offset now targets a fixed *absolute*
+                // offset the way an earlier version was: that offset now
+                // targets a fixed *absolute*
                 // screen position that's completely decoupled from
                 // headerBar's own (always-24) structural top padding, so
                 // there's no shared "baseline" left between the two to
