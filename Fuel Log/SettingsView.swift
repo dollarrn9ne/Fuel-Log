@@ -8,6 +8,29 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    /// Forces the iPad sidebar layout even though `horizontalSizeClass` reads
+    /// `.compact` here. A `.sheet()` presented from a `.phone`-idiom device
+    /// always gives its content a compact horizontal size class internally,
+    /// regardless of the presenting window's own size class or the sheet's
+    /// actual on-screen width - confirmed on-device: Duo's unfolded inner
+    /// display is `.regular` everywhere else, but this sheet still rendered
+    /// `phoneLayout`. Set `true` only from the one call site that represents
+    /// Duo's fully-open side panel (see `DashboardSheetContent`'s own
+    /// equivalent flag); real iPad needs no help, since its sheets do get a
+    /// usable size class from their actual presented width.
+    var forcesRegularLayout = false
+    private var usesPadLayout: Bool { horizontalSizeClass == .regular || forcesRegularLayout }
+    /// True only on Duo's own *outer* display - same 70pt reserved-column
+    /// threshold as `MainDashboardView.trailingClusterWidth(_:)`, measured
+    /// locally here rather than threaded in, since (unlike
+    /// `forcesRegularLayout`) nothing upstream already computes this for
+    /// Settings' one caller on that display. `closeButton` below uses it to
+    /// match the plain-glyph-in-a-glass-circle treatment used everywhere
+    /// else on Duo, instead of the self-contained `xmark.circle.fill`
+    /// symbol that reads fine inline in a normal nav bar but looked out of
+    /// place floating in this display's reserved column - requested
+    /// directly ("See the 'X' icon? Make it the same as in inner screen").
+    @State private var hasReservedTrailingColumn = false
     @AppStorage("appTheme") private var appTheme: AppTheme = .system
     @AppStorage("lastSelectedVehicleID") private var lastSelectedVehicleID: String = ""
     @AppStorage("smartRemindersEnabled") private var smartRemindersEnabled: Bool = false
@@ -97,12 +120,22 @@ struct SettingsView: View {
 
     var body: some View {
         Group {
-            if horizontalSizeClass == .regular {
+            if usesPadLayout {
+                // Book mode gets no special treatment here, unlike
+                // MainDashboardView's side panel - requested directly:
+                // keep Settings' layout the same regardless of hinge
+                // state, after an attempt at a hinge-flush book-mode
+                // treatment (narrowing+repositioning padLayout, then a
+                // second attempt reusing phoneLayout for it) didn't carry
+                // its weight for this screen.
                 padLayout
             } else {
                 phoneLayout
             }
         }
+        .onGeometryChange(for: Bool.self, of: { proxy in
+            proxy.safeAreaInsets.trailing > 70
+        }, action: { hasReservedTrailingColumn = $0 })
         // A File menu command opens Settings with an action waiting; run it once
         // this view exists, since the exporters and importers below belong to it.
         .task {
@@ -209,8 +242,59 @@ struct SettingsView: View {
                 aboutSection
             }
             .navigationTitle("Settings")
-            .toolbar { closeButton }
+            // Dropped for Duo's outer display, same reasoning as the inner
+            // display's own `forcesRegularLayout` case just below: a plain
+            // toolbar item there lands at the *top* of the reserved
+            // column, right by the clock, which read as out of place
+            // (requested directly - "why is the 'X' up in the right
+            // corner?"). The bottom-trailing overlay replaces it.
+            .toolbar { if !hasReservedTrailingColumn { closeButton } }
         }
+        .overlay(alignment: .bottomTrailing) {
+            if hasReservedTrailingColumn {
+                outerDisplayCloseButton
+            }
+        }
+    }
+
+    /// Back to the plain-glyph-plus-glass-circle treatment, same as the
+    /// inner display's own close button and every other floating icon on
+    /// Duo. `xmark.circle.fill` can't actually carry Liquid Glass itself
+    /// ("where is the liquid glass" - correctly called out): that symbol
+    /// paints one solid, opaque shape, and `glassEffect` renders its
+    /// material *behind* whatever it's attached to, so a glass circle
+    /// behind an already-opaque filled circle stays entirely hidden under
+    /// it. Getting a genuinely glassy circle means the circle has to be
+    /// its own non-opaque layer, with a plain glyph (no circle baked into
+    /// the symbol) drawn on top of it - this two-piece version, not the
+    /// one-piece symbol.
+    private var outerDisplayCloseButton: some View {
+        Group {
+            if #available(iOS 26.0, *) {
+                Button { dismiss() } label: {
+                    Image(systemName: "xmark").font(.title3).foregroundStyle(.primary)
+                        .frame(width: 44, height: 44)
+                        .glassEffect(.regular, in: Circle())
+                }
+                .buttonStyle(.plain)
+            } else {
+                Button { dismiss() } label: {
+                    Image(systemName: "xmark").font(.title3).foregroundStyle(.primary)
+                        .frame(width: 44, height: 44)
+                        .background(.regularMaterial, in: Circle())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        // Lowered from 32, then further still, then raised back up a bit,
+        // then lowered slightly again - requested directly, to align with
+        // the system Settings app's own bottom-left "Search" button when
+        // the two sit side by side in Split View. Converging via the same
+        // screenshot-ruler technique each round; 18pt is the latest
+        // estimate.
+        .padding(.bottom, 18)
+        .padding(.trailing, 26)
+        .ignoresSafeArea(.container, edges: [.trailing, .bottom])
     }
 
     /// Categories in a sidebar with their controls alongside, rather than one long
@@ -227,7 +311,26 @@ struct SettingsView: View {
                     .tag(section)
             }
             .navigationTitle("Settings")
-            .toolbar { closeButton }
+            // The system close button, only on real iPad: three different
+            // attempts at moving the *nav bar's own* position on Duo's
+            // full-screen presentation (a List's safeAreaInset, a sibling
+            // spacer outside the split view, a safeAreaInset on the split
+            // view itself) each either had no effect on the toolbar specifically,
+            // or came with a side effect (a mismatched background seam)
+            // worse than the problem. Dropping the system item for Duo
+            // entirely and drawing a plain overlay button below instead -
+            // that's ordinary view placement with no nav-bar chrome
+            // involved, so it isn't subject to whatever that chrome's own
+            // positioning rules are doing here.
+            .toolbar { if !forcesRegularLayout { closeButton } }
+            // Requested directly, for Duo's full-screen presentation: the
+            // sidebar should always stay visible, with no control to
+            // resize/collapse it away. Per Apple's own documented example,
+            // this goes on the sidebar view passed to `NavigationSplitView`'s
+            // first closure, not the split view itself. `nil` on real iPad
+            // leaves the system default (collapsing is normal there, and
+            // wasn't asked for).
+            .toolbar(removing: forcesRegularLayout ? .sidebarToggle : nil)
         } detail: {
             // Its own stack, so the Sharing and About rows can still push.
             NavigationStack {
@@ -242,6 +345,52 @@ struct SettingsView: View {
                         .navigationTitle(section.title)
                         .navigationBarTitleDisplayMode(.inline)
                 }
+            }
+        }
+        .overlay(alignment: .bottomTrailing) {
+            // Bottom-trailing, requested directly - matches where
+            // MainDashboardView's own relocated gear/settings icon lives
+            // in its icon column, rather than up by the status bar.
+            if forcesRegularLayout {
+                // Same glyph-plus-circle treatment as every other floating
+                // icon on Duo (MainDashboardView's mapControlButton/
+                // quickIconButton) - see the comment above those for why
+                // not the self-contained `xmark.circle.fill` symbol
+                // `closeButton` above uses. Back to Liquid Glass, requested
+                // directly - the opaque background was a fix for this
+                // button blending with a pushed view's back chevron when
+                // it sat at the top; now that it's moved to the bottom
+                // corner, away from nav-bar chrome, that collision is far
+                // less likely, and glass matches the rest of the app's
+                // floating icons.
+                Group {
+                    if #available(iOS 26.0, *) {
+                        Button { dismiss() } label: {
+                            Image(systemName: "xmark").font(.title3).foregroundStyle(.primary)
+                                .frame(width: 44, height: 44)
+                                .glassEffect(.regular, in: Circle())
+                        }
+                        .buttonStyle(.plain)
+                    } else {
+                        Button { dismiss() } label: {
+                            Image(systemName: "xmark").font(.title3).foregroundStyle(.primary)
+                                .frame(width: 44, height: 44)
+                                .background(.regularMaterial, in: Circle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.bottom, 32)
+                // Trailing padding that centres a 44pt button within the
+                // 84pt reserved column, plus the same 6pt correction
+                // MainDashboardView.reservedColumnRightMargin applies for
+                // its own circular buttons in this identical column on
+                // this identical display: (84-44)/2 + 6 = 26. Reusing that
+                // already-validated formula instead of eyeballing a fresh
+                // number from screenshots - two guesses in a row from pixel
+                // measurements alone went in overshooting/wrong directions.
+                .padding(.trailing, 26)
+                .ignoresSafeArea(.container, edges: .trailing)
             }
         }
     }
@@ -265,9 +414,15 @@ struct SettingsView: View {
     /// section and repeating it reads as a mistake. iPhone keeps the header,
     /// since there every section shares one screen.
     private func sectionHeader(_ title: String) -> Text {
-        horizontalSizeClass == .regular ? Text("") : Text(title)
+        usesPadLayout ? Text("") : Text(title)
     }
 
+    /// Only ever shown where there's no reserved trailing column to worry
+    /// about (a real iPhone, or real iPad's `padLayout`) - both Duo
+    /// displays replace this with their own bottom-trailing glass-circle
+    /// button instead (`outerDisplayCloseButton`, and `padLayout`'s own
+    /// `forcesRegularLayout` overlay), so this stays the plain
+    /// self-contained symbol with no extra branching.
     private var closeButton: some ToolbarContent {
         ToolbarItem(placement: .cancellationAction) {
             Button { dismiss() } label: {

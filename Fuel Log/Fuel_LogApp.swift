@@ -128,8 +128,22 @@ class AppDelegate: NSObject, UIApplicationDelegate {
     /// regular horizontal size class like an iPad, so it's freed to rotate.
     /// Reads the window's own traits rather than the device idiom, which
     /// stays `.phone` on Duo whether folded or not.
+    ///
+    /// Closed, Duo's own outer display is locked to `.portrait` regardless
+    /// of its horizontal size class - requested directly ("turn off
+    /// rotation for the outer screen"), after rotating it landscape left
+    /// the whole dedicated outer-display layout (the icon column, the
+    /// pill) badly squished, since that layout was only ever built for one
+    /// fixed aspect. Detected the same way as everywhere else in this
+    /// codebase that needs to single out Duo's outer display specifically
+    /// (see MainDashboardView.trailingClusterWidth's own comment for the
+    /// 70pt threshold and the 84pt on-device measurement it's based on) -
+    /// checked ahead of, and regardless of, the horizontal-size-class
+    /// branch below, since that alone wasn't actually preventing the
+    /// rotation this is locking out.
     func application(_ application: UIApplication, supportedInterfaceOrientationsFor window: UIWindow?) -> UIInterfaceOrientationMask {
         guard let window else { return .portrait }
+        if window.safeAreaInsets.right > 70 { return .portrait }
         return window.traitCollection.horizontalSizeClass == .regular ? .all : .portrait
     }
 }
