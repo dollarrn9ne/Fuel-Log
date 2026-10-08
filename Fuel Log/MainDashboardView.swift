@@ -225,7 +225,12 @@ struct MainDashboardView: View {
     /// requested directly, the buttons should sit closer to the status bar
     /// than that buffer left them. Still some margin below the cluster
     /// rather than flush against it.
-    private static let trailingClusterHeightEstimate: CGFloat = 130
+    ///
+    /// Raised back to 165: on-device hierarchy dump showed the status
+    /// cluster is 176pt tall (wifi ring ends at ~154), so at 130 the
+    /// locate button (130-177) sat half underneath it and read as faded or
+    /// missing.
+    private static let trailingClusterHeightEstimate: CGFloat = 165
 
     /// The map controls' own rendered diameter (title3 icon + 12pt padding),
     /// used to centre them inside the reserved column rather than clear of
@@ -1405,9 +1410,22 @@ struct DashboardSheetContent: View {
         // them from `smallestSheetFraction * screenHeight` - see
         // `relocatedIconTargetAbsoluteY`'s own doc comment for why the
         // estimate isn't reliable enough on its own.
-        .onGeometryChange(for: CGFloat.self, of: { proxy in
-            proxy.frame(in: .global).minY + (proxy.size.height - Self.relocatedIconColumnHeight) / 2 + Self.measuredFrameCorrection
-        }, action: { newTarget in
+        .onGeometryChange(for: CGRect.self, of: { proxy in
+            proxy.frame(in: .global)
+        }, action: { frame in
+            // Not every reported frame is the sheet's real resting frame:
+            // confirmed on-device (hierarchy dump) that the very first
+            // report can arrive before the sheet has been positioned
+            // (minY near 0), which froze the target ~369pt too high and
+            // left all four icons stacked behind the status cluster, off
+            // the pill entirely. Only accept a frame whose top is near
+            // where the small detent's top should be - screenHeight *
+            // (1 - smallestSheetFraction), within 10% of the screen - and
+            // keep waiting (the guard below leaves the target unset) until
+            // one arrives. Skipped when screenHeight isn't known (0).
+            let expectedTop = screenHeight * (1 - Self.smallestSheetFraction)
+            if screenHeight > 0, abs(frame.minY - expectedTop) > screenHeight * 0.1 { return }
+            let newTarget = frame.minY + (frame.height - Self.relocatedIconColumnHeight) / 2 + Self.measuredFrameCorrection
             // Only the first capture, deliberately - `sheetDetent` only
             // updates once a drag *settles* on a new detent, but this
             // geometry changes continuously *during* one, so without this
