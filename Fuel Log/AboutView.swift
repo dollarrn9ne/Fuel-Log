@@ -128,7 +128,16 @@ struct AboutView: View {
                 }
                 .disabled(storeKit.isPurchasing)
             }
-            .applyLiquidGlassOrBackground(cornerRadius: 14, fallbackColor: .secondarySystemGroupedBackground)
+            // Flat background, not Liquid Glass: this card sits over a plain
+            // backdrop (no map/content with contrast behind it the way the
+            // glass panels elsewhere in the app have), and every other
+            // Settings section's own card is a Form row's flat system
+            // background. Glass here read as visibly inconsistent once
+            // seen side-by-side with those in the iPad/Duo split-view
+            // detail pane, where switching between sections makes the
+            // difference obvious in a way a standalone phone screen never
+            // showed.
+            .applyLiquidGlassOrBackground(cornerRadius: 14, fallbackColor: .secondarySystemGroupedBackground, useGlass: false)
 
             Spacer(minLength: 0)
 

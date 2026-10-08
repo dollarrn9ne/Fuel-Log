@@ -27,18 +27,21 @@ import LocalAuthentication
 import FuelLogShared
 
 /// Bridges `View.onHingeChange(isEnabled:_:)` (iOS 27.1+) into a plain Bool
-/// binding, so `MainDashboardView` itself doesn't have to store the real
+/// binding, so callers don't have to store the real
 /// `DeviceHingeContext`/`DeviceHinge.Status` types - those aren't available
 /// pre-27.1, and this app's deployment target is 26.2. A no-op on older
-/// OSes: `isPartiallyOpen` just never flips from its `false` default, so the
-/// side panel stays in its normal trailing-docked position.
-private struct HingeTracker: ViewModifier {
+/// OSes: `isPartiallyOpen` just never flips from its `false` default, so
+/// whatever the caller does with it (e.g. MainDashboardView's side panel,
+/// SettingsView's split view) stays in its normal, non-book-mode position.
+/// Not private to MainDashboardView: SettingsView needs the same signal for
+/// its own book-mode layout.
+struct HingeTracker: ViewModifier {
     @Binding var isPartiallyOpen: Bool
 
     func body(content: Content) -> some View {
         if #available(iOS 27.1, *) {
             content.onHingeChange(isEnabled: true) { _, new in
-                withAnimation(MainDashboardView.layoutChangeAnimation) {
+                withAnimation(.smooth(duration: 0.3)) {
                     isPartiallyOpen = new.hinge?.status == .partiallyOpen
                 }
             }
@@ -155,12 +158,74 @@ struct MainDashboardView: View {
         return trailing > 70 ? trailing : 0
     }
 
+    /// `trailingClusterWidth`, but also true when Duo's unfolded inner
+    /// display has rotated into `.bottomSheet` (no real reserved column in
+    /// that orientation - `trailingClusterWidth` alone reports 0 there) -
+    /// requested directly: the 4 header icons should relocate into the same
+    /// vertical column there too, matching the outer display, rather than
+    /// sitting inline just because this particular rotation has no actual
+    /// camera-cluster safe area to avoid.
+    ///
+    /// Gated on `horizontalSizeClass == .regular`, not the idiom check used
+    /// elsewhere in this file - a real iPhone is always compact here, even
+    /// landscape, so this can't mistake one for Duo the way an idiom-only
+    /// check might if Apple ever ships a compact-but-.phone edge case.
+    /// Falls back to 84 (Duo's own real reserved-column width, measured on
+    /// the outer display) purely so the relocated column's own margin maths
+    /// - tuned against that real value - produces the same proportions here.
+    ///
+    /// Also requires `proxy.size.width` past a floor - confirmed on-device
+    /// that Split View still reports `.regular` for a Duo pane shared with
+    /// another app (e.g. Settings docked beside it), which is nowhere near
+    /// wide enough for a floating icon column to make sense and, worse,
+    /// fed the same width into `relocatedColumnNeedsManualInset`'s 84pt
+    /// manual content inset, squeezing an already-narrow pane further and
+    /// losing the icons entirely. 600 sits well below a rotated *full*
+    /// inner display's own width (which this case is actually meant for)
+    /// and well above a half-and-half Split View pane's.
+    private func sheetIconClusterWidth(_ proxy: GeometryProxy) -> CGFloat {
+        let real = trailingClusterWidth(proxy)
+        guard real == 0, horizontalSizeClass == .regular, proxy.size.width > 600 else { return real }
+        return 84
+    }
+
+    /// True only when Fuel Log occupies the *leading* pane of a two-app
+    /// Split View on Duo - requested directly: in that configuration, all
+    /// 6 floating controls (the map's globe/locate, plus the dashboard's 4
+    /// quick-action icons) should consolidate into one horizontal row
+    /// hugging the true left edge, mirroring the single reserved-column
+    /// convention used elsewhere on Duo - just mirrored to the opposite
+    /// edge, and horizontal rather than vertical, since this isn't a real
+    /// reserved hardware column to centre within.
+    ///
+    /// Narrow-width floor shared with `sheetIconClusterWidth`, for the same
+    /// reason (a genuinely narrow Split View pane, not Duo's own full
+    /// rotated display). `proxy.frame(in: .global).minX` near zero is what
+    /// actually distinguishes the leading pane from the trailing one -
+    /// Split View gives neither pane a `safeAreaInsets` signal to key off,
+    /// but each pane's own frame in the window's global coordinate space
+    /// still reflects which side of the screen it's docked to.
+    private func isLeadingSplitViewPane(_ proxy: GeometryProxy) -> Bool {
+        guard UIDevice.current.userInterfaceIdiom == .phone, proxy.size.width <= 600 else { return false }
+        // Duo's closed *outer* display is also narrow and flush with the
+        // left edge, so it would otherwise match below. It's told apart by
+        // its real reserved trailing column (`trailingClusterWidth` > 0),
+        // which a Split View pane never has.
+        guard trailingClusterWidth(proxy) == 0 else { return false }
+        return proxy.frame(in: .global).minX < 10
+    }
+
     /// Extra vertical clearance so the map controls sit below the column
     /// rather than beside it. `safeAreaInsets` only gives a flat edge width,
     /// not the column's actual height, so this is a calibrated estimate from
     /// the on-device screenshot (measured ~154pt tall) rather than a value
     /// read from any API - revisit if that changes.
-    private static let trailingClusterHeightEstimate: CGFloat = 165
+    ///
+    /// Lowered from 165 (the measured cluster height plus an 11pt buffer) -
+    /// requested directly, the buttons should sit closer to the status bar
+    /// than that buffer left them. Still some margin below the cluster
+    /// rather than flush against it.
+    private static let trailingClusterHeightEstimate: CGFloat = 130
 
     /// The map controls' own rendered diameter (title3 icon + 12pt padding),
     /// used to centre them inside the reserved column rather than clear of
@@ -296,7 +361,7 @@ struct MainDashboardView: View {
 
     @ViewBuilder
     private func bottomSheetContent(_ proxy: GeometryProxy) -> some View {
-        DashboardSheetContent(colorScheme: _colorScheme, vehicle: vehicle, allVehicles: allVehicles, events: timelineEvents, onSelectVehicle: onSelectVehicle, newReportMonth: newReportMonth, onAcknowledgeReport: onAcknowledgeReport, selectedLogTab: $selectedLogTab, sheetDetent: $sheetDetent, clusterWidth: trailingClusterWidth(proxy), showingAddFillUp: $showingAddFillUp, fillUpEntryMode: $fillUpEntryMode, showingAddService: $showingAddService, showingTrips: $showingTrips, showingSettings: $showingSettings, showingArchivedVehicles: $showingArchivedVehicles, showingAddVehicle: $showingAddVehicle, showingDeleteConfirmation: $showingDeleteConfirmation, showingCharts: $showingCharts, showingMonthlyReport: $showingMonthlyReport, monthlyReportMonth: $monthlyReportMonth, eventToEdit: $eventToEdit, vehicleToEdit: $vehicleToEdit)
+        DashboardSheetContent(colorScheme: _colorScheme, vehicle: vehicle, allVehicles: allVehicles, events: timelineEvents, onSelectVehicle: onSelectVehicle, newReportMonth: newReportMonth, onAcknowledgeReport: onAcknowledgeReport, selectedLogTab: $selectedLogTab, sheetDetent: $sheetDetent, clusterWidth: sheetIconClusterWidth(proxy), screenHeight: fullHeight(proxy), relocatedColumnNeedsManualInset: trailingClusterWidth(proxy) == 0, hidesInlineIcons: isLeadingSplitViewPane(proxy), leadingPaneIconColumn: isLeadingSplitViewPane(proxy), showingAddFillUp: $showingAddFillUp, fillUpEntryMode: $fillUpEntryMode, showingAddService: $showingAddService, showingTrips: $showingTrips, showingSettings: $showingSettings, showingArchivedVehicles: $showingArchivedVehicles, showingAddVehicle: $showingAddVehicle, showingDeleteConfirmation: $showingDeleteConfirmation, showingCharts: $showingCharts, showingMonthlyReport: $showingMonthlyReport, monthlyReportMonth: $monthlyReportMonth, eventToEdit: $eventToEdit, vehicleToEdit: $vehicleToEdit)
             .presentationDetents([.fraction(0.42), .large], selection: $sheetDetent)
             .presentationDragIndicator(.visible).presentationBackgroundInteraction(.enabled(upThrough: .fraction(0.42))).interactiveDismissDisabled()
             .presentationBackground { panelBackground(in: Rectangle()) }
@@ -397,23 +462,32 @@ struct MainDashboardView: View {
     /// exactly where windows get parked.
     private func layout(_ proxy: GeometryProxy) -> DashboardLayout {
         guard UIDevice.current.userInterfaceIdiom == .pad || horizontalSizeClass == .regular else { return .bottomSheet }
+        // Whenever Duo doesn't have room for the side panel, it should fall
+        // back to looking like its own outer/closed display (the sheet),
+        // never iPad's floating card - requested directly, after a fully
+        // unfolded Duo rotated into a narrow/portrait pose landed on the
+        // card by sharing iPad's own fallback below. `.bottomPanel` is only
+        // ever right for an actual iPad; Duo reaches this function at all
+        // because it shares iPad's regular-size-class guard above.
+        let fallback: DashboardLayout = UIDevice.current.userInterfaceIdiom == .phone ? .bottomSheet : .bottomPanel
         // The side panel only ever makes sense with width to spare beside the
-        // map, so a portrait-shaped window is always the card - regardless of
-        // hysteresis. Without this coarse guard, a 13" iPad's portrait width
-        // (1032pt) sits *above* the hysteresis-lowered threshold (1020pt), so
-        // rotating landscape -> portrait right after the side panel had shown
-        // left portrait stuck showing the side panel too. This is a guard at
-        // the extreme (width <= height), not the continuous ratio comparison
-        // that used to flicker on a near-square drag - real portrait/landscape
-        // aspects aren't anywhere near that boundary.
-        guard proxy.size.width > proxy.size.height else { return .bottomPanel }
+        // map, so a portrait-shaped window is always the fallback -
+        // regardless of hysteresis. Without this coarse guard, a 13" iPad's
+        // portrait width (1032pt) sits *above* the hysteresis-lowered
+        // threshold (1020pt), so rotating landscape -> portrait right after
+        // the side panel had shown left portrait stuck showing the side
+        // panel too. This is a guard at the extreme (width <= height), not
+        // the continuous ratio comparison that used to flicker on a
+        // near-square drag - real portrait/landscape aspects aren't
+        // anywhere near that boundary.
+        guard proxy.size.width > proxy.size.height else { return fallback }
         let minimumSidePanelWidth = UIDevice.current.userInterfaceIdiom == .pad
             ? Self.sidePanelMinimumWidth
             : Self.duoSidePanelMinimumWidth
         let threshold = layoutMode == .sidePanel
             ? minimumSidePanelWidth - Self.layoutSwitchHysteresis
             : minimumSidePanelWidth
-        return proxy.size.width >= threshold ? .sidePanel : .bottomPanel
+        return proxy.size.width >= threshold ? .sidePanel : fallback
     }
 
     /// Portrait shows a card floating clear of the edges with the map visible all
@@ -516,7 +590,10 @@ struct MainDashboardView: View {
             // draw it underneath the panel instead, since .overlay always
             // draws on top of everything already inside the view it's
             // chained onto, regardless of sibling order within that view).
-            if layout(proxy) != .sidePanel {
+            // Leading Split View pane gets its own consolidated row
+            // instead (see leadingIconRow, added as a later .overlay
+            // below) - same reasoning as the side panel case just above.
+            if layout(proxy) != .sidePanel && !isLeadingSplitViewPane(proxy) {
                 mapControlsOverlay(proxy)
             }
         }
@@ -562,6 +639,9 @@ struct MainDashboardView: View {
         // left it drawn first and so painted over by the panel.
         .overlay(alignment: .trailing) {
             if layout(proxy) == .sidePanel { sidePanelIconColumn(proxy) }
+        }
+        .overlay(alignment: .leading) {
+            if isLeadingSplitViewPane(proxy) { leadingIconRow(proxy) }
         }
         .overlay(alignment: .bottomLeading) {
             if layout(proxy) == .bottomPanel { bottomPanel(proxy) }
@@ -678,6 +758,13 @@ struct MainDashboardView: View {
         return (proxy.size.width + trailingClusterWidth(proxy)) / 2
     }
 
+    /// Breathing room the data-entry sheet keeps clear of `panelLeadingEdge`,
+    /// so its right edge doesn't land flush against the panel/hinge boundary.
+    /// Landing exactly on it read, on-device, as the sheet touching/crossing
+    /// the fold rather than sitting safely on its own half - requested
+    /// directly ("the left pill overlaps the hinge, move it a lil back left").
+    private static let duoSheetHingeMargin: CGFloat = 16
+
     /// The content's displayed width: normally `panelWidth(_:)`, but wider
     /// in "book" mode to actually use the extra room gained by the leading
     /// edge moving to the hinge, rather than leaving it as empty glass
@@ -691,7 +778,7 @@ struct MainDashboardView: View {
     }
 
     private func sidePanel(_ proxy: GeometryProxy) -> some View {
-        DashboardSheetContent(colorScheme: _colorScheme, vehicle: vehicle, allVehicles: allVehicles, events: timelineEvents, onSelectVehicle: onSelectVehicle, newReportMonth: newReportMonth, onAcknowledgeReport: onAcknowledgeReport, selectedLogTab: $selectedLogTab, sheetDetent: .constant(.large), hidesInlineIcons: true, showingAddFillUp: $showingAddFillUp, fillUpEntryMode: $fillUpEntryMode, showingAddService: $showingAddService, showingTrips: $showingTrips, showingSettings: $showingSettings, showingArchivedVehicles: $showingArchivedVehicles, showingAddVehicle: $showingAddVehicle, showingDeleteConfirmation: $showingDeleteConfirmation, showingCharts: $showingCharts, showingMonthlyReport: $showingMonthlyReport, monthlyReportMonth: $monthlyReportMonth, eventToEdit: $eventToEdit, vehicleToEdit: $vehicleToEdit)
+        DashboardSheetContent(colorScheme: _colorScheme, vehicle: vehicle, allVehicles: allVehicles, events: timelineEvents, onSelectVehicle: onSelectVehicle, newReportMonth: newReportMonth, onAcknowledgeReport: onAcknowledgeReport, selectedLogTab: $selectedLogTab, sheetDetent: .constant(.large), hidesInlineIcons: true, isSidePanelLayout: true, duoLeadingSheetWidth: max(panelLeadingEdge(proxy) - Self.duoSheetHingeMargin, 0), showingAddFillUp: $showingAddFillUp, fillUpEntryMode: $fillUpEntryMode, showingAddService: $showingAddService, showingTrips: $showingTrips, showingSettings: $showingSettings, showingArchivedVehicles: $showingArchivedVehicles, showingAddVehicle: $showingAddVehicle, showingDeleteConfirmation: $showingDeleteConfirmation, showingCharts: $showingCharts, showingMonthlyReport: $showingMonthlyReport, monthlyReportMonth: $monthlyReportMonth, eventToEdit: $eventToEdit, vehicleToEdit: $vehicleToEdit)
             .frame(width: panelContentWidth(proxy))
             .frame(maxHeight: .infinity)
             .background(alignment: .leading) {
@@ -709,17 +796,23 @@ struct MainDashboardView: View {
                 // as if the vertical one hadn't actually applied; combining
                 // every edge into one call is what actually reaches all of
                 // them, not just the last one called.
-                // Always stretches from the panel's current leading edge
-                // (hinge or docked, see `panelLeadingEdge(_:)`) out to the
-                // true trailing edge - requested directly: in "book" mode
-                // the panel should still reach over and attach to the icon
-                // column, the same way it does fully open, rather than
-                // floating as a detached card. An earlier version gave
-                // "book" mode its own fully-rounded, content-width-only
-                // background instead of this; confirmed on-device that left
-                // a visible gap of bare map between the panel and the icon
-                // column, floating disconnected from anything.
-                panelBackground(in: UnevenRoundedRectangle(topLeadingRadius: 28, bottomLeadingRadius: 28, style: .continuous), frosted: true)
+                //
+                // A two-layer (glass + separate plain trailing strip)
+                // version was tried here to avoid a dark-mode glass ghost
+                // artifact at the leading corner - reverted after it threw
+                // off the panel's own position/sizing on-device. Back to
+                // the single glass layer; the ghost is a known, separately
+                // tracked issue, not fixed by that attempt.
+                //
+                // Clipped to the glass's own shape: in dark mode the glass
+                // (over its black 50% fill) paints a soft dark halo just
+                // *outside* its leading edge and corners, which read as a
+                // shadow behind the panel's edge against the map -
+                // requested to be fixed. Clipping cuts off anything drawn
+                // beyond the shape and leaves the glass's own rim intact.
+                let panelShape = UnevenRoundedRectangle(topLeadingRadius: 28, bottomLeadingRadius: 28, style: .continuous)
+                panelBackground(in: panelShape, frosted: true)
+                    .clipShape(panelShape)
                     .frame(width: proxy.size.width + trailingClusterWidth(proxy) - panelLeadingEdge(proxy))
                     .ignoresSafeArea(.container, edges: [.top, .bottom, .trailing])
             }
@@ -803,6 +896,37 @@ struct MainDashboardView: View {
         .ignoresSafeArea(.container, edges: .trailing)
     }
 
+    /// Duo's leading-pane Split View: just the map's globe/locate buttons,
+    /// in a row hugging the true left edge - see `isLeadingSplitViewPane(_:)`
+    /// for when this applies. The 4 quick-action icons are *not* here: they
+    /// live inside the pill itself (`DashboardSheetContent.leadingPaneIconColumn`),
+    /// requested directly.
+    private func leadingIconRow(_ proxy: GeometryProxy) -> some View {
+        VStack {
+            // Stacked, globe above location, against the left edge -
+            // requested directly. In dark mode the globe is hidden and
+            // location sits alone at the top.
+            HStack {
+                VStack(spacing: 12) {
+                    if colorScheme != .dark {
+                        mapControlButton(systemImage: useSatellite ? "map.fill" : "globe.americas.fill") { useSatellite.toggle() }
+                    }
+                    mapControlButton(systemImage: "location.fill") {
+                        if let loc = locationManager.location { withAnimation(.easeInOut(duration: 0.5)) { mapPosition = .region(MKCoordinateRegion(center: loc.coordinate, latitudinalMeters: 1000, longitudinalMeters: 1000)) } } else {
+                            locationManager.onLocationUpdate = { loc in withAnimation(.easeInOut(duration: 0.5)) { mapPosition = .region(MKCoordinateRegion(center: loc.coordinate, latitudinalMeters: 1000, longitudinalMeters: 1000)) }; locationManager.onLocationUpdate = nil }
+                            locationManager.requestLocation()
+                        }
+                    }
+                }
+                Spacer()
+            }
+            .padding(.leading, 16)
+            .padding(.top, 16)
+            Spacer()
+        }
+        .ignoresSafeArea(.container, edges: .leading)
+    }
+
     /// How far below the true top edge the globe/locate buttons need to sit
     /// to clear Duo's unfolded inner display's own (normal, horizontal)
     /// status bar - calibrated from a user screenshot showing the globe
@@ -828,6 +952,14 @@ struct MainDashboardView: View {
     @ViewBuilder
     private func panelBackground(in shape: some Shape, frosted: Bool = false) -> some View {
         if #available(iOS 26.0, *) {
+            // Identical code for every call site (the inner side panel and
+            // the outer display's bottomPanel both land here) - requested
+            // directly, after three attempts at a dark-mode-specific
+            // adjustment (a flat fill to avoid a glass edge-highlight
+            // ghost; that same fill at a higher opacity; a Material
+            // instead of a flat fill) each made the inner panel look
+            // different from the outer one instead of matching it. Back to
+            // exactly what this was before any of those attempts.
             if colorScheme == .dark {
                 Color.black.opacity(0.5).glassEffect(frosted ? .regular : .clear, in: shape)
             } else {
@@ -1060,12 +1192,61 @@ struct DashboardSheetContent: View {
     /// than measured locally, since the parent already has to compute it for
     /// the map controls and the card's own width.
     var clusterWidth: CGFloat = 0
+    /// Full screen height (including safe areas - see
+    /// MainDashboardView.fullHeight(_:)), threaded in the same way as
+    /// `clusterWidth`. Only meaningful alongside `clusterWidth > 0`: it's
+    /// what `relocatedIconTargetAbsoluteY` derives the resting small pill's
+    /// geometry from, so the relocated icon column centres correctly
+    /// whatever size screen it's drawn on, rather than the fixed pixel
+    /// value this was hardcoded to before - that was calibrated by hand for
+    /// Duo's own outer display specifically, and silently put the column
+    /// mostly off-screen the moment `clusterWidth` started being forced on
+    /// for a differently-sized screen (Duo's unfolded inner display,
+    /// rotated into `.bottomSheet` - see `MainDashboardView.sheetIconClusterWidth(_:)`).
+    var screenHeight: CGFloat = 0
+    /// True only when `clusterWidth` is a synthetic stand-in rather than a
+    /// real system-reported safe area (Duo's unfolded inner display,
+    /// rotated into `.bottomSheet` - see
+    /// `MainDashboardView.sheetIconClusterWidth(_:)`). On Duo's outer
+    /// display, a *real* reserved column already narrows this whole view's
+    /// available width before its body even runs, which is why no row here
+    /// adds its own extra trailing padding for the relocated icon column
+    /// (confirmed on-device: the existing 24pt horizontal padding already
+    /// clears it with room to spare). A synthetic `clusterWidth` has no
+    /// such real safe area doing that narrowing, so without this, content
+    /// stretches the full screen width and collides with the floating icon
+    /// column instead of clearing it - requested directly ("move the data
+    /// over a little so that the icons aren't cut off").
+    var relocatedColumnNeedsManualInset: Bool = false
     /// True for the side panel only: MainDashboardView.sidePanel renders its
     /// own copy of `quickIconColumn` (pulled directly off a second instance
     /// of this view, alongside the map's globe/locate buttons) in the
     /// panel's extended trailing strip, so this view's own header shouldn't
     /// also render them inline - they'd otherwise show up twice.
     var hidesInlineIcons: Bool = false
+    /// True only for Fuel Log in the leading pane of a Duo Split View (see
+    /// `MainDashboardView.isLeadingSplitViewPane(_:)`): the 4 quick-action
+    /// icons stack vertically down the pill's own leading edge, centred
+    /// vertically, instead of floating over the map or sitting in the
+    /// header. Requested directly. Pair with `hidesInlineIcons`.
+    var leadingPaneIconColumn: Bool = false
+    /// True for the side panel only (same call sites as `hidesInlineIcons`
+    /// above) - forwarded to `SettingsView(forcesRegularLayout:)`. A sheet
+    /// presented from a `.phone`-idiom device (Duo included, even unfolded)
+    /// always gives its content a compact `horizontalSizeClass` internally,
+    /// regardless of this view's own environment or the sheet's actual
+    /// width - confirmed on-device: Settings rendered its single-column
+    /// phone layout here despite the side panel itself being `.regular`
+    /// everywhere else. Real iPad needs no help, since its sheets do get a
+    /// usable size class from their actual presented width.
+    var isSidePanelLayout: Bool = false
+    /// `nil` everywhere except the Duo side panel, where it's the exact
+    /// width available on the leading side before the panel's own leading
+    /// edge (`MainDashboardView.panelLeadingEdge(_:)`) - forwarded to
+    /// `roomySheetOnPad(duoLeadingWidth:)` on the data-entry sheets so they
+    /// dock to the leading half of the screen without crossing into the
+    /// panel (or, in book mode, the hinge it's pinned against).
+    var duoLeadingSheetWidth: CGFloat? = nil
 
     /// Owned by MainDashboardView, not here: this view is rebuilt from scratch
     /// whenever an iPad rotation crosses the side-panel/bottom-panel width
@@ -1088,6 +1269,10 @@ struct DashboardSheetContent: View {
 
     @State private var searchText: String = ""
     @StateObject private var sheetMenuCommands = MenuCommandBus.shared
+    /// Measured, not estimated, once the sheet is first seen resting at its
+    /// small detent - see `relocatedIconTargetAbsoluteY`'s own doc comment
+    /// for why a measurement beats a formula here.
+    @State private var measuredRestingIconTargetY: CGFloat? = nil
 
     var body: some View {
         // GeometryReader here (rather than threading a detent-based offset
@@ -1114,6 +1299,21 @@ struct DashboardSheetContent: View {
         // which is never explicitly capped, so ignoresSafeArea inside it
         // has actual room to work with.
         ZStack(alignment: .topTrailing) {
+        HStack(spacing: 0) {
+        if leadingPaneIconColumn {
+            // Same fixed absolute screen position at every detent -
+            // requested directly (no moving, no animation between small and
+            // large). Same technique as `relocatedIconRow`: top-aligned,
+            // then offset by (target - this view's live top edge), so it
+            // stays put as the pill grows. The target is the column centred
+            // in the resting small pill.
+            VStack(spacing: 0) {
+                quickIconColumn
+                    .offset(y: relocatedIconTargetAbsoluteY - geo.frame(in: .global).minY)
+                Spacer(minLength: 0)
+            }
+            .padding(.leading, 16)
+        }
         VStack(spacing: 0) {
             headerBar
             ScrollView {
@@ -1187,9 +1387,41 @@ struct DashboardSheetContent: View {
                 }
             }
         }
+        // See `relocatedColumnNeedsManualInset`'s own doc comment: the real
+        // outer-display case needs nothing here because a real safe area
+        // already narrows this entire view's available width before its
+        // body even runs. This mimics that same whole-view narrowing by
+        // hand, for the one case where there's no real safe area doing it -
+        // applied to this whole VStack rather than any individual row, to
+        // match that real behaviour as closely as possible (every row,
+        // including the scrolling log list, ends up equally narrower).
+        .padding(.trailing, relocatedColumnNeedsManualInset ? clusterWidth : 0)
+        }
 
         relocatedIconRow(sheetTopY: geo.frame(in: .global).minY)
         }
+        // Captures the resting/small pill's *real* top and height the
+        // moment the sheet is actually seen there, rather than estimating
+        // them from `smallestSheetFraction * screenHeight` - see
+        // `relocatedIconTargetAbsoluteY`'s own doc comment for why the
+        // estimate isn't reliable enough on its own.
+        .onGeometryChange(for: CGFloat.self, of: { proxy in
+            proxy.frame(in: .global).minY + (proxy.size.height - Self.relocatedIconColumnHeight) / 2 + Self.measuredFrameCorrection
+        }, action: { newTarget in
+            // Only the first capture, deliberately - `sheetDetent` only
+            // updates once a drag *settles* on a new detent, but this
+            // geometry changes continuously *during* one, so without this
+            // guard, every intermediate frame of a small -> large drag
+            // would overwrite this with a mid-drag (not actually resting)
+            // value, right up until the drag finally commits - exactly the
+            // jitter a fixed target was supposed to avoid in the first
+            // place. The one capture this allows happens right after this
+            // view's first appearance, before any drag has had a chance to
+            // start, while the sheet is genuinely still sitting at its
+            // default small detent.
+            guard measuredRestingIconTargetY == nil, sheetDetent == .fraction(Self.smallestSheetFraction) else { return }
+            measuredRestingIconTargetY = newTarget
+        })
         }
         // Presentations for this content's own actions. Nested here rather
         // than on MainDashboardView: on iPhone this view is itself always
@@ -1203,25 +1435,39 @@ struct DashboardSheetContent: View {
         // MainDashboardView (see its state block for why), so they survive
         // this view being torn down and rebuilt when iPad's layout swaps
         // between the side panel and the bottom panel.
-        .sheet(isPresented: $showingAddFillUp) { NavigationStack { AddFillUpView(vehicle: vehicle, entryMode: fillUpEntryMode) }.roomySheetOnPad() }
-        .sheet(isPresented: $showingAddService) { NavigationStack { AddServiceView(vehicle: vehicle) }.roomySheetOnPad() }
-        .sheet(item: $eventToEdit) { ev in NavigationStack { switch ev { case .fillUp(let f): AddFillUpView(vehicle: vehicle, editingFillUp: f); case .service(let s): AddServiceView(vehicle: vehicle, editingService: s) } }.roomySheetOnPad() }
-        .sheet(isPresented: $showingAddVehicle) { NavigationStack { AddVehicleView() }.roomySheetOnPad() }
-        .sheet(item: $vehicleToEdit) { v in NavigationStack { AddVehicleView(editingVehicle: v) }.roomySheetOnPad() }
+        .sheet(isPresented: $showingAddFillUp) { NavigationStack { AddFillUpView(vehicle: vehicle, entryMode: fillUpEntryMode) }.roomySheetOnPad(duoLeadingWidth: duoLeadingSheetWidth) }
+        .sheet(isPresented: $showingAddService) { NavigationStack { AddServiceView(vehicle: vehicle) }.roomySheetOnPad(duoLeadingWidth: duoLeadingSheetWidth) }
+        .sheet(item: $eventToEdit) { ev in NavigationStack { switch ev { case .fillUp(let f): AddFillUpView(vehicle: vehicle, editingFillUp: f); case .service(let s): AddServiceView(vehicle: vehicle, editingService: s) } }.roomySheetOnPad(duoLeadingWidth: duoLeadingSheetWidth) }
+        .sheet(isPresented: $showingAddVehicle) { NavigationStack { AddVehicleView() }.roomySheetOnPad(duoLeadingWidth: duoLeadingSheetWidth) }
+        .sheet(item: $vehicleToEdit) { v in NavigationStack { AddVehicleView(editingVehicle: v) }.roomySheetOnPad(duoLeadingWidth: duoLeadingSheetWidth) }
         .sheet(isPresented: $showingArchivedVehicles) { ArchivedVehiclesView().roomySheetOnPad() }
         .sheet(item: $vehicleShareItem) { item in ActivityView(activityItems: [item.url]) }
         .alert("Delete \(vehicle.name)?", isPresented: $showingDeleteConfirmation) { Button("Cancel", role: .cancel) {}; Button("Delete", role: .destructive) { deleteVehicle() } } message: { Text("This will permanently delete this vehicle and all logs.") }
         .sheet(isPresented: $showingMonthlyReport) { NavigationStack { MonthlyReportView(month: monthlyReportMonth, vehicle: vehicle, isModal: true) }.roomySheetOnPad() }
-        // A pop-up sheet again rather than a full-screen cover: Settings'
-        // sections are short (often a single toggle or picker), and filling
-        // the whole screen with the sidebar for that left most of it empty.
-        // The sidebar itself isn't going anywhere - SettingsView still picks
-        // its NavigationSplitView layout on iPad regardless of how roomy the
-        // sheet presenting it is; only the presentation's own size changes.
-        .sheet(isPresented: $showingSettings) {
+        // A pop-up sheet rather than a full-screen cover on real iPad/phone:
+        // Settings' sections are short (often a single toggle or picker),
+        // and filling the whole screen with the sidebar for that left most
+        // of it empty. Duo's side panel is the one exception, requested
+        // directly - `.page` sizing there is still just a floating card far
+        // short of the screen's actual width, nothing like how roomy the
+        // same card is on a real iPad, so it read as cramped rather than
+        // intentional. Two presentations sharing one Boolean's worth of
+        // state (each gated so only one is ever actually true) rather than
+        // a single modifier, since SwiftUI has no "sheet here, full-screen
+        // cover there" switch on one trigger.
+        .sheet(isPresented: Binding(
+            get: { showingSettings && !isSidePanelLayout },
+            set: { showingSettings = $0 }
+        )) {
             SettingsView()
                 .presentationCompactAdaptation(.fullScreenCover)
                 .roomySheetOnPad()
+        }
+        .fullScreenCover(isPresented: Binding(
+            get: { showingSettings && isSidePanelLayout },
+            set: { showingSettings = $0 }
+        )) {
+            SettingsView(forcesRegularLayout: true)
         }
         // Trips and Charts stay full-screen: unlike Settings, their content
         // (a trip list, or wide charts) actually grows to use the screen.
@@ -1313,7 +1559,7 @@ struct DashboardSheetContent: View {
                 HStack {
                     Spacer()
                     quickIconColumn
-                        .offset(y: Self.relocatedIconTargetAbsoluteY - sheetTopY)
+                        .offset(y: relocatedIconTargetAbsoluteY - sheetTopY)
                         .padding(.trailing, max(0, (clusterWidth - Self.relocatedIconColumnWidth) / 2 + Self.reservedColumnRightMargin - Self.sheetEdgeInset))
                 }
                 Spacer()
@@ -1322,23 +1568,62 @@ struct DashboardSheetContent: View {
         }
     }
 
-    /// The fixed absolute screen position the icon column always targets -
-    /// calibrated to sit vertically centred within the small pill
-    /// specifically (the large detent just inherits whatever this value
-    /// is, and has plenty of headroom either way).
+    /// The absolute screen position the icon column always targets -
+    /// centred within the resting/small pill specifically (the large detent
+    /// just inherits whatever this value is, and has plenty of headroom
+    /// either way).
     ///
-    /// This is NOT derived from `smallestSheetFraction` or any other
-    /// constant - it has to be re-measured and updated by hand whenever
-    /// the small pill's own height changes, which bit once already:
-    /// raising `smallestSheetFraction` (0.38 -> 0.42, for more clearance
-    /// below "View Trends & Charts") moved the small pill's centre without
-    /// this value following it, leaving the icon column off-centre again
-    /// (measured on-device: 57pt top margin vs 32pt bottom margin - 25pt
-    /// off, not the ~0.3pt this was converged to before). Recalculated from
-    /// a fresh on-device measurement of the *current* small pill (sheet
-    /// top 369.0, height 301.0): centred top margin = 369.0 + (301.0-212)/2
-    /// = 413.5.
-    private static let relocatedIconTargetAbsoluteY: CGFloat = 413.5
+    /// A hardcoded constant (413.5, re-measured by hand whenever the small
+    /// pill's own height changed - e.g. once already when
+    /// `smallestSheetFraction` moved 0.38 -> 0.42) worked as long as this
+    /// row only ever appeared on one specific screen size, Duo's outer
+    /// display. It broke the instant a second, differently-sized screen
+    /// started relocating this row too (Duo's unfolded inner display,
+    /// rotated into `.bottomSheet` - see
+    /// `MainDashboardView.sheetIconClusterWidth(_:)`): the fixed pixel
+    /// target put the column mostly off-screen there.
+    ///
+    /// Replacing it with a `smallestSheetFraction * screenHeight` estimate
+    /// generalised to any screen size in principle, but confirmed on-device
+    /// to still be off (uneven top/bottom margins) - the small pill's real
+    /// rendered height isn't simply that fraction of the screen (see
+    /// `MainDashboardView`'s own task history: it already needed a "more
+    /// robust" floor on top of the plain fraction once, for the same
+    /// reason). `measuredRestingIconTargetY`, captured straight off the
+    /// sheet's own real geometry the moment it's actually seen resting at
+    /// the small detent, sidesteps needing to know that relationship at
+    /// all. The formula stays only as a same-frame fallback, so the column
+    /// has *a* position (close, if not exact) before that first
+    /// measurement lands rather than popping in from nowhere.
+    private var relocatedIconTargetAbsoluteY: CGFloat {
+        if let measuredRestingIconTargetY { return measuredRestingIconTargetY }
+        let pillTop = screenHeight * (1 - Self.smallestSheetFraction)
+        let pillHeight = screenHeight * Self.smallestSheetFraction
+        return pillTop + (pillHeight - Self.relocatedIconColumnHeight) / 2
+    }
+
+    /// A small, fixed gap between this view's own `GeometryReader` frame
+    /// and the true visible pill shape reported by the accessibility
+    /// hierarchy - confirmed on-device: with no correction, the measured
+    /// target landed the icon column's top margin at 35.7pt against a
+    /// bottom margin of 53.3pt (should both be 44.5pt for a pill measuring
+    /// {8, 369} by {450, 301pt} tall), i.e. ~8.8pt high. Most likely the
+    /// system's own reserved space for `.presentationDragIndicator`,
+    /// outside this view's own measured bounds but inside the pill shape
+    /// the user actually sees - a fixed system-chrome height, not
+    /// something that should scale with screen size, unlike the error the
+    /// measurement itself replaced.
+    private static let measuredFrameCorrection: CGFloat = 8.8
+
+    /// Mirrors `MainDashboardView.smallestSheetFraction` - duplicated, not
+    /// shared, for the same reason `reservedColumnRightMargin` below is:
+    /// different type, no common ancestor to hang a shared constant off of.
+    private static let smallestSheetFraction: CGFloat = 0.42
+
+    /// `quickIconColumn`'s own rendered height: 4 buttons at
+    /// `relocatedIconColumnWidth` (44pt, square/circular) plus the VStack's
+    /// own 12pt spacing between them (3 gaps).
+    private static let relocatedIconColumnHeight: CGFloat = 4 * 44 + 3 * 12
 
     /// A single icon button's own width (44pt) - see `relocatedIconRow`'s
     /// centring maths, which mirrors MainDashboardView's for the map's
@@ -1517,8 +1802,12 @@ struct DashboardSheetContent: View {
     }
 
     /// Used inline in the header everywhere the icon row isn't relocated (a
-    /// normal iPhone, iPad, or Duo's inner display).
-    private var quickIconRow: some View {
+    /// normal iPhone, iPad, or Duo's inner display) - also used by
+    /// `MainDashboardView.leadingIconRow(_:)` via a second
+    /// `DashboardSheetContent` instance, the same way `quickIconColumn`
+    /// already is by `sidePanelIconColumn`, which is why this isn't
+    /// `private` either.
+    var quickIconRow: some View {
         HStack(spacing: 12) { quickIconButtons }
     }
 

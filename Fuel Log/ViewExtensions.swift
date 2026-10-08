@@ -65,8 +65,46 @@ extension View {
     /// room to breathe.
     ///
     /// No effect on iPhone, where a sheet fills the width regardless.
-    func roomySheetOnPad() -> some View {
-        presentationSizing(.page)
+    ///
+    /// - Parameter duoLeadingWidth: Duo's side panel only (`nil` everywhere
+    ///   else, including real iPad - unaffected). Docks the sheet to the
+    ///   leading edge and caps its width at this value, in both fully-open
+    ///   and book-mode poses - the app's own side panel always occupies the
+    ///   trailing half (against the hinge in book mode), so the data-entry
+    ///   sheet takes the other, leading half instead of covering it or
+    ///   spilling across the hinge. Requested directly: data-input sheets
+    ///   should occupy a definite side of the screen on Duo, not float
+    ///   centered over the map the way they do on a real iPad.
+    func roomySheetOnPad(duoLeadingWidth: CGFloat? = nil) -> some View {
+        presentationSizing(.page.fitted(horizontal: duoLeadingWidth != nil, vertical: false))
+            .modifier(DuoSheetPlacement(leadingWidth: duoLeadingWidth))
+    }
+}
+
+/// Bridges `View.presentationPlacement(_:)` (iOS 27.0+) the same way
+/// `HingeTracker` bridges `onHingeChange` - callers pass a plain
+/// `CGFloat?` instead of needing the real `PresentationPlacement` type,
+/// which isn't available pre-27.0 (this app's deployment target is 26.2).
+/// A no-op on older OSes and when `leadingWidth` is `nil`: the sheet keeps
+/// its default, centred placement and `.page`'s own width.
+///
+/// The explicit `.frame(width:)` is what actually caps the presentation's
+/// width - `.presentationSizing(.fitted)` only proposes `nil` so the
+/// content's own frame decides the size, per Apple's own documented
+/// pattern for fixed-size sheets. `.page`'s default horizontal sizing
+/// otherwise sizes well past this fixed-width content, which bled across
+/// the hinge/panel boundary on-device.
+private struct DuoSheetPlacement: ViewModifier {
+    let leadingWidth: CGFloat?
+
+    func body(content: Content) -> some View {
+        if #available(iOS 27.0, *), let leadingWidth {
+            content
+                .frame(width: leadingWidth)
+                .presentationPlacement(.leading)
+        } else {
+            content
+        }
     }
 }
 

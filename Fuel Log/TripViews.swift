@@ -47,6 +47,19 @@ struct TripsListView: View {
 
     var trips: [Trip] { allTrips.filter { $0.vehicle?.id == vehicle.id } }
 
+    /// Width of Duo's reserved trailing column (status bar / camera cluster)
+    /// when one exists, else 0 - read from the trailing safe-area inset, with
+    /// the same >70pt threshold the dashboard uses so an ordinary landscape
+    /// iPhone's small notch inset doesn't count.
+    @State private var trailingInset: CGFloat = 0
+    private var trailingClusterWidth: CGFloat { trailingInset > 70 ? trailingInset : 0 }
+
+    /// How far below the top edge the relocated buttons start, to clear the
+    /// status cluster. Same calibrated value as the dashboard's
+    /// `MainDashboardView.trailingClusterHeightEstimate`.
+    private static let clusterClearance: CGFloat = 130
+    private static let relocatedButtonDiameter: CGFloat = 44
+
     var body: some View {
         Group {
             if horizontalSizeClass == .regular {
@@ -54,6 +67,10 @@ struct TripsListView: View {
             } else {
                 phoneLayout
             }
+        }
+        .onGeometryChange(for: CGFloat.self) { $0.safeAreaInsets.trailing } action: { trailingInset = $0 }
+        .overlay(alignment: .topTrailing) {
+            if horizontalSizeClass == .regular && trailingClusterWidth > 0 { relocatedButtons }
         }
         .sheet(isPresented: $showingAdd) { NavigationStack { AddTripView(defaultVehicle: vehicle) } }
         .sheet(item: $tripToEdit) { t in NavigationStack { AddTripView(editingTrip: t) } }
@@ -132,7 +149,11 @@ struct TripsListView: View {
             }
             .overlay(emptyStateOverlay)
             .navigationTitle("Trips")
-            .toolbar { closeButton; addButton }
+            // With Duo's trailing column present, close and add move out of
+            // the sidebar into that column (see `relocatedButtons`).
+            .toolbar { if trailingClusterWidth == 0 { closeButton; addButton } }
+            // The sidebar toggle is dropped - requested directly.
+            .toolbar(removing: .sidebarToggle)
         } detail: {
             // Its own stack, so a selected trip can still push to its edit sheet
             // or map without disturbing the sidebar's selection.
@@ -159,6 +180,44 @@ struct TripsListView: View {
     private var emptyStateOverlay: some View {
         if trips.isEmpty {
             VStack { Spacer(); ContentUnavailableView("No Trips", systemImage: "map", description: Text("Tap + to log your first trip for \(vehicle.name).")); Spacer() }.offset(y: 40)
+        }
+    }
+
+    /// Close and add as a vertical pair in Duo's reserved trailing column,
+    /// below the status cluster - centred in the column the same way the
+    /// dashboard's relocated icons are (including its 6pt correction, since
+    /// the column isn't flush against the true trailing edge).
+    /// `ignoresSafeArea` lets the buttons reach into the column at all.
+    private var relocatedButtons: some View {
+        VStack(spacing: 12) {
+            Button { dismiss() } label: { relocatedButtonLabel("xmark") }
+                .accessibilityLabel("Close")
+            Button { showingAdd = true } label: { relocatedButtonLabel("plus") }
+                .accessibilityLabel("Add Trip")
+        }
+        .buttonStyle(.plain)
+        // One extra button slot (44 + 12 spacing) below the cluster: the
+        // detail pane's own NavigationStack puts the system's back button
+        // into this same column, directly under the status cluster, whenever
+        // something is pushed (e.g. a monthly report) - confirmed on-device
+        // that starting right at `clusterClearance` drew the close button on
+        // top of it. Always reserving the slot keeps these clear whether or
+        // not a back button is showing.
+        .padding(.top, Self.clusterClearance + Self.relocatedButtonDiameter + 12)
+        .padding(.trailing, max(0, (trailingClusterWidth - Self.relocatedButtonDiameter) / 2 + 6))
+        .ignoresSafeArea(.container, edges: .trailing)
+    }
+
+    @ViewBuilder
+    private func relocatedButtonLabel(_ systemImage: String) -> some View {
+        let icon = Image(systemName: systemImage)
+            .font(.system(size: 20, weight: .semibold))
+            .foregroundStyle(.primary)
+            .frame(width: Self.relocatedButtonDiameter, height: Self.relocatedButtonDiameter)
+        if #available(iOS 26.0, *) {
+            icon.glassEffect(.regular, in: Circle())
+        } else {
+            icon.background(.regularMaterial, in: Circle())
         }
     }
 
