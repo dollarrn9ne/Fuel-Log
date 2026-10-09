@@ -26,6 +26,19 @@ import AppIntents
 import LocalAuthentication
 import FuelLogShared
 
+/// The resting (small) detent for Duo's unfolded inner display in portrait
+/// only - everywhere else the pill rests at a plain 42% fraction. That
+/// screen is much taller than the outer display, so 42% showed the
+/// Fuel/Service Logs control and the search bar below "View Trends &
+/// Charts"; requested directly: nothing below that button until the pill is
+/// raised. 259pt is calibrated on-device to end just below it, with the
+/// segmented control hidden.
+struct DuoInnerRestingPillDetent: CustomPresentationDetent {
+    static let fixedHeight: CGFloat = 259
+
+    static func height(in context: Context) -> CGFloat? { fixedHeight }
+}
+
 /// Bridges `View.onHingeChange(isEnabled:_:)` (iOS 27.1+) into a plain Bool
 /// binding, so callers don't have to store the real
 /// `DeviceHingeContext`/`DeviceHinge.Status` types - those aren't available
@@ -364,12 +377,27 @@ struct MainDashboardView: View {
     /// column live in relocatedIconRow instead, positioned independently
     /// of whatever width this pill has.
 
+    /// The pill's resting detent: a fixed short height on Duo's inner display
+    /// in portrait (see `DuoInnerRestingPillDetent`), else 42%.
+    private func restingDetent(_ proxy: GeometryProxy) -> PresentationDetent {
+        trailingClusterWidth(proxy) == 0 && sheetIconClusterWidth(proxy) > 0
+            ? .custom(DuoInnerRestingPillDetent.self)
+            : .fraction(0.42)
+    }
+
     @ViewBuilder
     private func bottomSheetContent(_ proxy: GeometryProxy) -> some View {
         DashboardSheetContent(colorScheme: _colorScheme, vehicle: vehicle, allVehicles: allVehicles, events: timelineEvents, onSelectVehicle: onSelectVehicle, newReportMonth: newReportMonth, onAcknowledgeReport: onAcknowledgeReport, selectedLogTab: $selectedLogTab, sheetDetent: $sheetDetent, clusterWidth: sheetIconClusterWidth(proxy), screenHeight: fullHeight(proxy), relocatedColumnNeedsManualInset: trailingClusterWidth(proxy) == 0, hidesInlineIcons: isLeadingSplitViewPane(proxy), leadingPaneIconColumn: isLeadingSplitViewPane(proxy), showingAddFillUp: $showingAddFillUp, fillUpEntryMode: $fillUpEntryMode, showingAddService: $showingAddService, showingTrips: $showingTrips, showingSettings: $showingSettings, showingArchivedVehicles: $showingArchivedVehicles, showingAddVehicle: $showingAddVehicle, showingDeleteConfirmation: $showingDeleteConfirmation, showingCharts: $showingCharts, showingMonthlyReport: $showingMonthlyReport, monthlyReportMonth: $monthlyReportMonth, eventToEdit: $eventToEdit, vehicleToEdit: $vehicleToEdit)
-            .presentationDetents([.fraction(0.42), .large], selection: $sheetDetent)
-            .presentationDragIndicator(.visible).presentationBackgroundInteraction(.enabled(upThrough: .fraction(0.42))).interactiveDismissDisabled()
+            .presentationDetents([restingDetent(proxy), .large], selection: $sheetDetent)
+            .presentationDragIndicator(.visible).presentationBackgroundInteraction(.enabled(upThrough: restingDetent(proxy))).interactiveDismissDisabled()
             .presentationBackground { panelBackground(in: Rectangle()) }
+            // Keep the selection on whichever resting detent applies now
+            // (it differs between Duo's inner portrait display and
+            // everything else, and can change on rotation/fold) - a
+            // selection that isn't one of the offered detents is invalid.
+            .onChange(of: restingDetent(proxy), initial: true) { _, resting in
+                if sheetDetent != .large { sheetDetent = resting }
+            }
     }
 
     /// MapKit leaves its own margin above the inset before drawing the Apple Maps
@@ -1423,7 +1451,7 @@ struct DashboardSheetContent: View {
             // (1 - smallestSheetFraction), within 10% of the screen - and
             // keep waiting (the guard below leaves the target unset) until
             // one arrives. Skipped when screenHeight isn't known (0).
-            let expectedTop = screenHeight * (1 - Self.smallestSheetFraction)
+            let expectedTop = screenHeight - restingPillHeight
             if screenHeight > 0, abs(frame.minY - expectedTop) > screenHeight * 0.1 { return }
             let newTarget = frame.minY + (frame.height - Self.relocatedIconColumnHeight) / 2 + Self.measuredFrameCorrection
             // Only the first capture, deliberately - `sheetDetent` only
@@ -1437,7 +1465,7 @@ struct DashboardSheetContent: View {
             // view's first appearance, before any drag has had a chance to
             // start, while the sheet is genuinely still sitting at its
             // default small detent.
-            guard measuredRestingIconTargetY == nil, sheetDetent == .fraction(Self.smallestSheetFraction) else { return }
+            guard measuredRestingIconTargetY == nil, sheetDetent != .large else { return }
             measuredRestingIconTargetY = newTarget
         })
         }
@@ -1615,8 +1643,8 @@ struct DashboardSheetContent: View {
     /// measurement lands rather than popping in from nowhere.
     private var relocatedIconTargetAbsoluteY: CGFloat {
         if let measuredRestingIconTargetY { return measuredRestingIconTargetY }
-        let pillTop = screenHeight * (1 - Self.smallestSheetFraction)
-        let pillHeight = screenHeight * Self.smallestSheetFraction
+        let pillHeight = restingPillHeight
+        let pillTop = screenHeight - pillHeight
         return pillTop + (pillHeight - Self.relocatedIconColumnHeight) / 2
     }
 
@@ -1637,6 +1665,14 @@ struct DashboardSheetContent: View {
     /// shared, for the same reason `reservedColumnRightMargin` below is:
     /// different type, no common ancestor to hang a shared constant off of.
     private static let smallestSheetFraction: CGFloat = 0.42
+
+    /// The resting pill's height: Duo's inner portrait display uses a fixed
+    /// height (`DuoInnerRestingPillDetent`, signalled here by
+    /// `relocatedColumnNeedsManualInset`), everything else the plain
+    /// fraction of the screen.
+    private var restingPillHeight: CGFloat {
+        (relocatedColumnNeedsManualInset && clusterWidth > 0) ? DuoInnerRestingPillDetent.fixedHeight : screenHeight * Self.smallestSheetFraction
+    }
 
     /// `quickIconColumn`'s own rendered height: 4 buttons at
     /// `relocatedIconColumnWidth` (44pt, square/circular) plus the VStack's
@@ -1809,9 +1845,17 @@ struct DashboardSheetContent: View {
                 .symbolEffect(.pulse, options: .repeating, isActive: newReportMonth != nil)
         }
         .accessibilityIdentifier("TripsButton")
+        // Greyed out and disabled on every device and layout (iPhone, iPad,
+        // Duo outer/inner, side panel, Split View pane - they all draw this
+        // one button) until the App Clip's share-for-logging flow works -
+        // requested directly. `shareVehicleForLogging()` is left in place,
+        // just unreachable; re-enable by removing `.disabled(true)` and the
+        // `.opacity(0.35)`.
         quickIconButton(action: { shareVehicleForLogging() }) {
             Image(systemName: "square.and.arrow.up").font(.system(size: 20)).foregroundStyle(.primary)
         }
+        .disabled(true)
+        .opacity(0.35)
         .accessibilityIdentifier("ShareVehicleButton")
         .accessibilityLabel("Share \(vehicle.name) for logging")
         quickIconButton(action: { showingSettings = true }) {
