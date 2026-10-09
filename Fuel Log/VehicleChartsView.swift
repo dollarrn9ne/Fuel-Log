@@ -221,8 +221,12 @@ struct VehicleChartsView: View {
             .navigationTitle("Trends & Charts")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Close") { dismiss() }
+                // With Duo's reserved trailing column present, close moves
+                // into it as an X (see `relocatedCloseButton`).
+                if trailingClusterWidth == 0 {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Close") { dismiss() }
+                    }
                 }
             }
             .onAppear { resetScrollPosition() }
@@ -230,6 +234,40 @@ struct VehicleChartsView: View {
             .onChange(of: customStart) { _, _ in resetScrollPosition() }
             .onChange(of: customEnd) { _, _ in resetScrollPosition() }
         }
+        .onGeometryChange(for: CGFloat.self) { $0.safeAreaInsets.trailing } action: { trailingInset = $0 }
+        .overlay(alignment: .topTrailing) {
+            if trailingClusterWidth > 0 { relocatedCloseButton }
+        }
+    }
+
+    /// Width of Duo's reserved trailing column (status cluster) when one
+    /// exists, else 0 - same >70pt threshold as the dashboard and Trips.
+    @State private var trailingInset: CGFloat = 0
+    private var trailingClusterWidth: CGFloat { trailingInset > 70 ? trailingInset : 0 }
+
+    /// Close as an X in Duo's reserved trailing column, below the status
+    /// cluster - requested directly, replacing the text "Close" button at
+    /// the top leading edge. Same placement maths as the dashboard's map
+    /// buttons and `TripsListView.relocatedButtons`: 165pt clearance (the
+    /// cluster is ~176pt tall), centred in the column with the 6pt
+    /// correction, `ignoresSafeArea` so it can reach into the column.
+    private var relocatedCloseButton: some View {
+        Button { dismiss() } label: {
+            let icon = Image(systemName: "xmark")
+                .font(.system(size: 20, weight: .semibold))
+                .foregroundStyle(.primary)
+                .frame(width: 44, height: 44)
+            if #available(iOS 26.0, *) {
+                icon.glassEffect(.regular, in: Circle())
+            } else {
+                icon.background(.regularMaterial, in: Circle())
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Close")
+        .padding(.top, 165)
+        .padding(.trailing, max(0, (trailingClusterWidth - 44) / 2 + 6))
+        .ignoresSafeArea(.container, edges: .trailing)
     }
 
     /// Wide enough on an iPad, or an unfolded Duo, to earn taller charts and a
