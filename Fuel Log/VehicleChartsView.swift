@@ -47,26 +47,12 @@ struct VehicleChartsView: View {
     }
     
     var efficiencyData: [(date: Date, value: Double)] {
-        let allSorted = (vehicle.fillUps ?? []).sorted { $0.date < $1.date }
-        let electricEfficiency = vehicle.efficiencyUnit == .miPerKWh || vehicle.efficiencyUnit == .kmPerKWh
-        var effDict: [UUID: Double] = [:]
-        
-        for (prev, curr) in zip(allSorted, allSorted.dropFirst()) {
-            guard let cOdo = curr.odometer, let pOdo = prev.odometer, cOdo > pOdo, curr.isFullTank else { continue }
-            if (curr.unit == .kwh) != electricEfficiency { continue }
-            let dist = cOdo - pOdo
-            let vol = curr.volume
-            if vol > 0 && dist > 0 {
-                let val = EfficiencyConverter.convert(distance: dist, odometerUnit: vehicle.odometerUnit, volume: vol, fuelUnit: vehicle.fuelUnit, to: vehicle.efficiencyUnit)
-                effDict[curr.id] = val
-            }
-        }
-        
+        // Same full-tank-to-full-tank segments as the dashboard average (see
+        // Vehicle.segmentEfficiencies) - per-point values used to measure only
+        // from the previous fill-up, which was wrong after a partial fill.
+        let efficiencies = vehicle.segmentEfficiencies()
         return filteredFills.compactMap { f in
-            if let val = effDict[f.id] {
-                return (f.date, val)
-            }
-            return nil
+            efficiencies[f.id].map { (f.date, $0) }
         }
     }
     

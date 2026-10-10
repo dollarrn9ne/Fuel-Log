@@ -154,6 +154,42 @@ public enum EfficiencyConverter {
         return EfficiencyConverter.convert(distance: dist, odometerUnit: odometerUnit, volume: vol, fuelUnit: fuelUnit, to: efficiencyUnit)
     }
 
+    /// Efficiency of each full-tank fill-up, keyed by fill-up id, in the
+    /// vehicle's efficiency unit - the per-log counterpart of
+    /// `averageEfficiency`, and built from the same full-tank-to-full-tank
+    /// segments so the two always agree.
+    ///
+    /// A full tank "closes" a segment: distance since the previous *full* tank,
+    /// divided by every fill-up since then (any partial fill-ups in between plus
+    /// the closing one). Measuring only from the immediately preceding fill-up
+    /// - which is what the log rows, charts and widget used to do - gave the
+    /// wrong figure after a partial fill: the closing fill refills what was
+    /// burned since the *full* tank, not just since the partial one (e.g. 150mi
+    /// / 7.5gal = 20 MPG shown, against a true 300mi / 10gal = 30 MPG).
+    ///
+    /// Fill-ups that aren't full tanks, have no odometer, or whose energy type
+    /// doesn't match the efficiency unit (a plug-in's charges) get no entry.
+    public func segmentEfficiencies() -> [UUID: Double] {
+        let sorted = (fillUps ?? []).sorted { $0.date < $1.date }
+        let electricEfficiency = efficiencyUnit == .miPerKWh || efficiencyUnit == .kmPerKWh
+        var result: [UUID: Double] = [:]
+        var lastFullOdo: Double? = nil
+        var volumeSinceLastFull: Double = 0
+        for fill in sorted {
+            if (fill.unit == .kwh) != electricEfficiency { continue }
+            guard let odo = fill.odometer else { continue }
+            volumeSinceLastFull += fill.volume
+            if fill.isFullTank {
+                if let prevOdo = lastFullOdo, odo > prevOdo, volumeSinceLastFull > 0 {
+                    result[fill.id] = EfficiencyConverter.convert(distance: odo - prevOdo, odometerUnit: odometerUnit, volume: volumeSinceLastFull, fuelUnit: fuelUnit, to: efficiencyUnit)
+                }
+                lastFullOdo = odo
+                volumeSinceLastFull = 0
+            }
+        }
+        return result
+    }
+
     /// Average efficiency per fuel grade, for grades that have enough data to
     /// produce a figure. Ordered by `FuelGrade`'s declaration order.
     /// One row per fuel actually used, keyed on the name shown to the user.

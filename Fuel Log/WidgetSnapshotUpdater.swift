@@ -45,15 +45,10 @@ enum WidgetSnapshotUpdater {
 
         // Recent per-segment efficiency values (oldest→newest) for a sparkline,
         // matching the per-point method used in the in-app charts.
-        let electricEfficiency = v.efficiencyUnit == .miPerKWh || v.efficiencyUnit == .kmPerKWh
+        // Same segments as the dashboard average (see Vehicle.segmentEfficiencies).
+        let segmentEfficiencies = v.segmentEfficiencies()
         let sortedFills = (v.fillUps ?? []).sorted { $0.date < $1.date }
-        var efficiencyPoints: [Double] = []
-        for (prev, curr) in zip(sortedFills, sortedFills.dropFirst()) {
-            guard let cOdo = curr.odometer, let pOdo = prev.odometer, cOdo > pOdo, curr.isFullTank else { continue }
-            if (curr.unit == .kwh) != electricEfficiency { continue }
-            guard curr.volume > 0 else { continue }
-            efficiencyPoints.append(EfficiencyConverter.convert(distance: cOdo - pOdo, odometerUnit: v.odometerUnit, volume: curr.volume, fuelUnit: v.fuelUnit, to: v.efficiencyUnit))
-        }
+        let efficiencyPoints: [Double] = sortedFills.compactMap { segmentEfficiencies[$0.id] }
         let recentEfficiencyPoints = Array(efficiencyPoints.suffix(12))
 
         // Maintenance: whichever comes first (mirrors SmartRemindersManager)
