@@ -581,7 +581,10 @@ class CSVImporter: ObservableObject {
                 if insideQuotes, i + 1 < characters.count, characters[i + 1] == "\"" { currentField.append("\""); i += 1 } else { insideQuotes.toggle() }
             } else if char == ",", !insideQuotes {
                 currentRow.append(currentField); currentField = ""
-            } else if (char == "\n" || char == "\r"), !insideQuotes {
+            } else if (char == "\n" || char == "\r" || char == "\r\n"), !insideQuotes {
+                // "\r\n" is a single Character in Swift (one grapheme cluster),
+                // so a Windows/Excel-style CSV never matched "\n" or "\r"
+                // alone and the whole file parsed as one row - nothing imported.
                 if char == "\r", i + 1 < characters.count, characters[i + 1] == "\n" { i += 1 }
                 currentRow.append(currentField); result.append(currentRow); currentRow = []; currentField = ""
             } else { currentField.append(char) }

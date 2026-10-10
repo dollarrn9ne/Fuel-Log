@@ -159,8 +159,10 @@ struct TimelineRow: View {
                 return String(format: "%.1f %@", dist / vol, unitString)
             }
             let effUnit = event.vehicle?.efficiencyUnit ?? .mpgUS
-            let vehicle = event.vehicle
-            let val = EfficiencyConverter.convert(distance: dist, odometerUnit: vehicle?.odometerUnit ?? .miles, volume: vol, fuelUnit: vehicle?.fuelUnit ?? .gallons, to: effUnit)
+            // Measured from the previous *full* tank across any partial fills
+            // in between, so it matches the dashboard average - not from the
+            // immediately preceding fill-up, which was wrong after a partial.
+            guard let val = event.vehicle?.segmentEfficiencies()[f.id] else { return nil }
             
             let unitString: String
             switch effUnit {
