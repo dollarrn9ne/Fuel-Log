@@ -581,6 +581,15 @@ struct MainDashboardView: View {
     /// the hinge margin above.
     private static let duoPanelWidth: CGFloat = 346
 
+    /// True on iPhone-idiom devices - in the side-panel layout that means Duo's
+    /// unfolded inner display. The consolidated trailing icon column, the
+    /// header-icon removal, and the leading-docked data-entry sheets exist only
+    /// for Duo; a real iPad's side panel keeps its original layout (icons inline
+    /// in the panel header, globe/locate on the map beside the panel).
+    private var usesDuoSidePanelChrome: Bool {
+        UIDevice.current.userInterfaceIdiom == .phone
+    }
+
     /// Which of the two width constants above applies, based on idiom - see
     /// `duoPanelWidth`'s own comment for why Duo needs a narrower one.
     private func panelWidth(_ proxy: GeometryProxy) -> CGFloat {
@@ -635,7 +644,7 @@ struct MainDashboardView: View {
             // Leading Split View pane gets its own consolidated row
             // instead (see leadingIconRow, added as a later .overlay
             // below) - same reasoning as the side panel case just above.
-            if layout(proxy) != .sidePanel && !isLeadingSplitViewPane(proxy) {
+            if (layout(proxy) != .sidePanel || !usesDuoSidePanelChrome) && !isLeadingSplitViewPane(proxy) {
                 mapControlsOverlay(proxy)
             }
         }
@@ -680,7 +689,7 @@ struct MainDashboardView: View {
         // inside the same ZStack sidePanel's content lives in, earlier,
         // left it drawn first and so painted over by the panel.
         .overlay(alignment: .trailing) {
-            if layout(proxy) == .sidePanel { sidePanelIconColumn(proxy) }
+            if layout(proxy) == .sidePanel && usesDuoSidePanelChrome { sidePanelIconColumn(proxy) }
         }
         .overlay(alignment: .leading) {
             if isLeadingSplitViewPane(proxy) { leadingIconRow(proxy) }
@@ -820,7 +829,7 @@ struct MainDashboardView: View {
     }
 
     private func sidePanel(_ proxy: GeometryProxy) -> some View {
-        DashboardSheetContent(colorScheme: _colorScheme, vehicle: vehicle, allVehicles: allVehicles, events: timelineEvents, onSelectVehicle: onSelectVehicle, newReportMonth: newReportMonth, onAcknowledgeReport: onAcknowledgeReport, selectedLogTab: $selectedLogTab, sheetDetent: .constant(.large), hidesInlineIcons: true, isSidePanelLayout: true, duoLeadingSheetWidth: max(panelLeadingEdge(proxy) - Self.duoSheetHingeMargin, 0), showingAddFillUp: $showingAddFillUp, fillUpEntryMode: $fillUpEntryMode, showingAddService: $showingAddService, showingTrips: $showingTrips, showingSettings: $showingSettings, showingArchivedVehicles: $showingArchivedVehicles, showingAddVehicle: $showingAddVehicle, showingDeleteConfirmation: $showingDeleteConfirmation, showingCharts: $showingCharts, showingMonthlyReport: $showingMonthlyReport, monthlyReportMonth: $monthlyReportMonth, eventToEdit: $eventToEdit, vehicleToEdit: $vehicleToEdit)
+        DashboardSheetContent(colorScheme: _colorScheme, vehicle: vehicle, allVehicles: allVehicles, events: timelineEvents, onSelectVehicle: onSelectVehicle, newReportMonth: newReportMonth, onAcknowledgeReport: onAcknowledgeReport, selectedLogTab: $selectedLogTab, sheetDetent: .constant(.large), hidesInlineIcons: usesDuoSidePanelChrome, isSidePanelLayout: usesDuoSidePanelChrome, duoLeadingSheetWidth: usesDuoSidePanelChrome ? max(panelLeadingEdge(proxy) - Self.duoSheetHingeMargin, 0) : nil, showingAddFillUp: $showingAddFillUp, fillUpEntryMode: $fillUpEntryMode, showingAddService: $showingAddService, showingTrips: $showingTrips, showingSettings: $showingSettings, showingArchivedVehicles: $showingArchivedVehicles, showingAddVehicle: $showingAddVehicle, showingDeleteConfirmation: $showingDeleteConfirmation, showingCharts: $showingCharts, showingMonthlyReport: $showingMonthlyReport, monthlyReportMonth: $monthlyReportMonth, eventToEdit: $eventToEdit, vehicleToEdit: $vehicleToEdit)
             .frame(width: panelContentWidth(proxy))
             .frame(maxHeight: .infinity)
             .background(alignment: .leading) {
