@@ -225,6 +225,15 @@ struct MainDashboardView: View {
         // its real reserved trailing column (`trailingClusterWidth` > 0),
         // which a Split View pane never has.
         guard trailingClusterWidth(proxy) == 0 else { return false }
+        // A real Split View pane is narrower than the physical screen. A
+        // full-screen window is exactly screen width - which every regular
+        // iPhone (and Duo's unfolded display in portrait) is, so without
+        // this check they all matched the test below and got the Duo
+        // Split View layout (icons in a pill column, map buttons top-left).
+        // Confirmed from a regular iPhone screenshot. Split View doesn't
+        // exist on a regular iPhone, so this keeps the layout Duo-only.
+        let screenWidth = (UIApplication.shared.connectedScenes.first as? UIWindowScene)?.screen.bounds.width ?? UIScreen.main.bounds.width
+        guard proxy.size.width < screenWidth - 40 else { return false }
         return proxy.frame(in: .global).minX < 10
     }
 
