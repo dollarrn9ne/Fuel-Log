@@ -190,6 +190,39 @@ public enum EfficiencyConverter {
         return result
     }
 
+    // MARK: Full-tank sanity check
+
+    /// A "full tank" fill-up smaller than this share of the vehicle's usual
+    /// full tank is probably a partial fill with the Full Tank switch left on.
+    public static let smallFullTankFraction: Double = 0.6
+
+    /// Fewest earlier full-tank fill-ups needed before their sizes are trusted
+    /// as "usual" when no tank capacity has been entered.
+    private static let minimumFillUpsForUsualTank = 3
+
+    /// What this vehicle normally takes to fill from empty-ish, in its own fuel
+    /// unit: the entered tank capacity if there is one, otherwise the median size
+    /// of its earlier full-tank fill-ups (needs a few, so a new vehicle gets no
+    /// answer rather than a bad one). Charging is excluded. Pass the id of a
+    /// fill-up being edited so it isn't compared against itself.
+    public func usualFullTankVolume(excluding excludedID: UUID? = nil) -> Double? {
+        if let capacity = tankCapacity, capacity > 0 { return capacity }
+        let volumes = (fillUps ?? [])
+            .filter { $0.isFullTank && $0.unit != .kwh && $0.volume > 0 && $0.id != excludedID }
+            .map(\.volume)
+            .sorted()
+        guard volumes.count >= Self.minimumFillUpsForUsualTank else { return nil }
+        let mid = volumes.count / 2
+        return volumes.count % 2 == 0 ? (volumes[mid - 1] + volumes[mid]) / 2 : volumes[mid]
+    }
+
+    /// True when `volume` (in the vehicle's fuel unit) is far enough below the
+    /// usual full tank that flagging it "full" will probably skew MPG.
+    public func isSuspiciouslySmallFullTank(volume: Double, excluding excludedID: UUID? = nil) -> Bool {
+        guard volume > 0, let usual = usualFullTankVolume(excluding: excludedID) else { return false }
+        return volume < usual * Self.smallFullTankFraction
+    }
+
     /// Average efficiency per fuel grade, for grades that have enough data to
     /// produce a figure. Ordered by `FuelGrade`'s declaration order.
     /// One row per fuel actually used, keyed on the name shown to the user.
