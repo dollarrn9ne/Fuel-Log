@@ -96,6 +96,38 @@ struct AddFillUpView: View {
         return Array(suggestions.prefix(15))
     }
 
+    /// The volume being entered, in the vehicle's own fuel unit - converted
+    /// from the foreign unit for a cross-border fill, and derived from total /
+    /// price when volume itself wasn't typed (matching `saveFillUp`).
+    private var enteredVolumeInVehicleUnit: Double? {
+        let typed = Double(volumeStr.replacingOccurrences(of: ",", with: "."))
+        let derived: Double? = {
+            guard let total = Double(totalCostStr.replacingOccurrences(of: ",", with: ".")),
+                  let price = Double(pricePerUnitStr.replacingOccurrences(of: ",", with: ".")), price > 0 else { return nil }
+            return total / price
+        }()
+        guard var vol = typed ?? derived, vol > 0 else { return nil }
+        if isCrossBorder, foreignUnit != vehicle.fuelUnit {
+            if vehicle.fuelUnit == .gallons && foreignUnit == .liters { vol *= 0.264172 }
+            else if vehicle.fuelUnit == .liters && foreignUnit == .gallons { vol *= 3.78541 }
+        }
+        return vol
+    }
+
+    /// Non-blocking notice shown under the Full Tank switch when it's on but the
+    /// amount is far below what this vehicle usually takes. A partial fill left
+    /// flagged "full" makes that stretch's MPG too high and the next one too
+    /// low, and the app can't tell on its own. Never shown for charging, with
+    /// the switch off, or before the vehicle has enough history.
+    private var smallFullTankWarning: String? {
+        guard !isChargeMode, isFullTank,
+              let vol = enteredVolumeInVehicleUnit,
+              vehicle.isSuspiciouslySmallFullTank(volume: vol, excluding: editingFillUp?.id),
+              let usual = vehicle.usualFullTankVolume(excluding: editingFillUp?.id) else { return nil }
+        let unit = vehicle.fuelUnit.rawValue.lowercased()
+        return String(format: "%.1f %@ is much less than this vehicle's usual full tank (about %.1f). If you didn't fill it all the way, mark it as a partial fill so MPG isn't thrown off.", vol, unit, usual)
+    }
+
     var body: some View {
         Form {
             Section {
@@ -242,6 +274,16 @@ struct AddFillUpView: View {
                         }
                     }
                     Toggle("Full Tank", isOn: $isFullTank)
+                    if let warning = smallFullTankWarning {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Label(warning, systemImage: "exclamationmark.triangle.fill")
+                                .font(.footnote)
+                                .foregroundStyle(.orange)
+                            Button("Mark as Partial Fill") { isFullTank = false }
+                                .font(.footnote.weight(.semibold))
+                                .buttonStyle(.borderless)
+                        }
+                    }
                 }
             }
             Section("Notes") { TextEditor(text: $notes).frame(minHeight: 80) }
