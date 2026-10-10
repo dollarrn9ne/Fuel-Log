@@ -49,6 +49,8 @@ struct SettingsView: View {
     @State private var showingServiceReportSheet = false
     @State private var showingPurgeConfirmation = false
     @State private var isImporting = false
+    /// Set when an import finished but added no records - see `runCSVImport`.
+    @State private var showingNothingImportedAlert = false
     @State private var isExporting = false
     @State private var importProgress: Double = 0.0
     @State private var exportProgress: Double = 0.0
@@ -201,6 +203,11 @@ struct SettingsView: View {
             Button("Choose Backup…", role: .destructive) { showingRestoreImporter = true }
         } message: {
             Text("Restoring will replace all current vehicles, trips, categories, and logs with the contents of the backup you select. This cannot be undone.")
+        }
+        .alert("Nothing Imported", isPresented: $showingNothingImportedAlert) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text("No records in this file matched the app you selected. Check the source app, or try Auto-Detect.")
         }
         .alert("Backup & Restore", isPresented: $showingBackupError) {
             Button("OK", role: .cancel) { }
@@ -687,9 +694,9 @@ struct SettingsView: View {
         csvDocument = CSVDocument(text: csvString, encoding: selectedEncoding.stringEncoding); isExporting = false; showFileExporter = true
     }
     
-    @MainActor private func performImport(data: String, source: ImportSource) async {
+    @MainActor private func performImport(data: String, source: ImportSource) async -> Int {
         let importer = CSVImporter()
-        await importer.performImport(data: data, source: source, modelContext: modelContext)
+        return await importer.performImport(data: data, source: source, modelContext: modelContext)
     }
 
     /// Runs the import and its progress/success UI, shared by the file importer
@@ -697,8 +704,11 @@ struct SettingsView: View {
     @MainActor private func runCSVImport(data: String, source: ImportSource) async {
         isImporting = true
         importProgress = 0.0
-        await performImport(data: data, source: source)
+        let imported = await performImport(data: data, source: source)
         isImporting = false
+        // An import that matched nothing used to end in "Import Complete!"
+        // anyway, leaving a customer with an empty app and no clue why.
+        guard imported > 0 else { showingNothingImportedAlert = true; return }
         withAnimation { showImportSuccess = true }
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
             withAnimation { showImportSuccess = false }

@@ -36,6 +36,9 @@ struct EmptyGarageView: View {
     @State private var showFileImporter = false
     @State private var pendingImportSource: ImportSource = .none
     @State private var selectedEncoding: ExportEncoding = .utf8
+    /// Set when an import added no records, so the empty garage doesn't just
+    /// sit there unchanged with no explanation.
+    @State private var showingNothingImportedAlert = false
     /// Otherwise there's no way to reach Settings at all with no vehicle to
     /// host the dashboard's own gearshape button - Danger Zone's restore, or
     /// just checking Backup & Restore, shouldn't require adding a vehicle first.
@@ -86,12 +89,20 @@ struct EmptyGarageView: View {
             .fileImporter(isPresented: $showFileImporter, allowedContentTypes: [.commaSeparatedText]) { result in
                 if case .success(let url) = result, url.startAccessingSecurityScopedResource() {
                     if let data = try? String(contentsOf: url, encoding: selectedEncoding.stringEncoding) {
-                        Task { await csvImporter.performImport(data: data, source: pendingImportSource, modelContext: modelContext) }
+                        Task {
+                            let imported = await csvImporter.performImport(data: data, source: pendingImportSource, modelContext: modelContext)
+                            if imported == 0 { showingNothingImportedAlert = true }
+                        }
                     }
                     url.stopAccessingSecurityScopedResource()
                 }
             }
             .overlay { if csvImporter.isImporting { ProgressOverlay(title: "Importing Data...", progress: csvImporter.importProgress) } }
+            .alert("Nothing Imported", isPresented: $showingNothingImportedAlert) {
+                Button("OK", role: .cancel) { }
+            } message: {
+                Text("No records in this file matched the app you selected. Check the source app, or try Auto-Detect.")
+            }
             .sheet(isPresented: $showingSettings) {
                 SettingsView()
                     .presentationCompactAdaptation(.fullScreenCover)

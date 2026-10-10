@@ -8,12 +8,28 @@ class CSVImporter: ObservableObject {
     @Published var isImporting = false
     @Published var importProgress: Double = 0.0
 
-    func performImport(data: String, source: ImportSource, modelContext: ModelContext) async {
+    /// Fill-ups, services and (non-placeholder) trips currently stored.
+    /// Compared before and after an import to count what it actually added.
+    private func recordCount(_ modelContext: ModelContext) -> Int {
+        let fillUps = (try? modelContext.fetchCount(FetchDescriptor<FillUp>())) ?? 0
+        let services = (try? modelContext.fetchCount(FetchDescriptor<ServiceRecord>())) ?? 0
+        let trips = ((try? modelContext.fetch(FetchDescriptor<Trip>())) ?? []).filter { !$0.name.hasPrefix("Since Day One") }.count
+        return fillUps + services + trips
+    }
+
+    /// Returns how many records the import added. Zero means nothing matched
+    /// the chosen source's layout - callers should say so rather than show a
+    /// success message, which is what used to happen (an import that matched
+    /// nothing still ended in "Import Complete").
+    @discardableResult
+    func performImport(data: String, source: ImportSource, modelContext: ModelContext) async -> Int {
         isImporting = true
         importProgress = 0.0
-        
+        let before = recordCount(modelContext)
+        defer { isImporting = false }
+
         let rows = parseCSV(data)
-        guard !rows.isEmpty else { isImporting = false; return }
+        guard !rows.isEmpty else { return 0 }
         
         switch source {
         case .roadTrip:
@@ -31,7 +47,7 @@ class CSVImporter: ObservableObject {
                 await importRoadTripCSV(rows, modelContext: modelContext)
             } else {
                 let header = (rows.first ?? []).map { $0.lowercased() }.joined(separator: " ")
-                if header.contains("car_name") || header.contains("car name") || header.contains("fuelup_date") || header.contains("fuelup date") {
+                if header.contains("car_name") || header.contains("car name") || header.contains("fuelup_date") || header.contains("fuelup date") || header.contains("cost/gallon") || header.contains("cost/litre") || header.contains("cost/liter") || (header.contains("filled up") && header.contains("gas brand")) {
                     await importFuellyCSV(rows, modelContext: modelContext)
                 } else if data.contains("## Vehicle") || data.contains("## Log") || header.contains("fuel_amount") || header.contains("price_per_liter") {
                     await importFuelioCSV(rows, modelContext: modelContext)
@@ -42,15 +58,15 @@ class CSVImporter: ObservableObject {
                 }
             }
         }
-        
-        isImporting = false
+
+        return max(0, recordCount(modelContext) - before)
     }
     
     private func parseFlexibleDate(_ dateStr: String) -> Date? {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
-        let formats = [
-            "yyyy-MM-dd'T'HH:mm:ssZ", "yyyy-MM-dd'T'HH:mm:ss", "yyyy-MM-dd HH:mm:ss", "yyyy-MM-dd HH:mm", "yyyy-MM-dd", "yyyy-M-d H:mm:ss", "yyyy-M-d H:mm", "yyyy-M-d",
+        let formats: [String] = [
+            "yyyy-MM-dd'T'HH:mm:ssZ", "yyyy-MM-dd'T'HH:mm:ss", "yyyy-MM-dd HH:mm:ss", "yyyy-MM-dd HH:mm", "yyyy-MM-dd h:mm a", "yyyy-MM-dd", "yyyy-M-d H:mm:ss", "yyyy-M-d H:mm", "yyyy-M-d",
             "MM/dd/yyyy HH:mm:ss", "MM/dd/yyyy HH:mm", "MM/dd/yyyy h:mm a", "MM/dd/yyyy", "M/d/yyyy H:mm", "M/d/yyyy h:mm a", "M/d/yyyy",
             "MM/dd/yy HH:mm", "MM/dd/yy h:mm a", "M/d/yy H:mm", "M/d/yy h:mm a", "MM/dd/yy", "M/d/yy",
             "yyyy/MM/dd", "yyyy/M/d",
@@ -143,30 +159,61 @@ class CSVImporter: ObservableObject {
         }
     }
 
+    /// Parses a number out of a spreadsheet-style cell: "22,492", "$5.10",
+    /// "11.430". Keeps digits, the decimal point and a minus sign, so
+    /// thousands separators and currency symbols don't turn a value into nil.
+    private func parseNumber(_ text: String) -> Double? {
+        Double(text.filter { $0.isNumber || $0 == "." || $0 == "-" })
+    }
+
+    /// Handles both of Fuelly's export layouts: the older one
+    /// (`car_name`, `fuelup_date`, litres/gallons, price...) and the current
+    /// one (`Type, MPG, Date, Time, Vehicle, Odometer, Filled Up,
+    /// Cost/Gallon, Gallons, Total Cost, ...`). The current one used to fall
+    /// straight through the first guard below - no vehicle/date column
+    /// matched - so nothing was imported, silently.
     private func importFuellyCSV(_ rows: [[String]], modelContext: ModelContext) async {
         guard rows.count > 1 else { return }
-        let header = rows[0].map { $0.lowercased() }
-        guard let vehicleCol = columnIndex(in: header, matching: ["car_name", "car name", "vehicle name"]),
-              let dateCol = columnIndex(in: header, matching: ["fuelup_date", "fuelup date", "fuelup"]) else { return }
+        let header = rows[0].map { $0.lowercased().trimmingCharacters(in: .whitespacesAndNewlines) }
+        guard let vehicleCol = columnIndex(in: header, matching: ["car_name", "car name", "vehicle name"]) ?? header.firstIndex(of: "vehicle"),
+              let dateCol = columnIndex(in: header, matching: ["fuelup_date", "fuelup date", "fuelup"]) ?? header.firstIndex(of: "date") else { return }
+        let timeCol = header.firstIndex(of: "time")
         let odoCol = columnIndex(in: header, matching: ["odometer", "odo"])
-        let volCol = columnIndex(in: header, matching: ["litre", "gallon"])
-        let priceCol = columnIndex(in: header, matching: ["price"])
-        let notesCol = columnIndex(in: header, matching: ["notes", "note", "tags"])
+        // Exact names first: a plain "contains gallon" match would pick the
+        // "Cost/Gallon" column (which comes before "Gallons") as the volume.
+        let volumeNames: Set<String> = ["gallons", "gallon", "liters", "litres", "liter", "litre"]
+        let volCol = header.firstIndex(where: { volumeNames.contains($0) })
+            ?? header.firstIndex(where: { ($0.contains("litre") || $0.contains("gallon")) && !$0.contains("cost") && !$0.contains("price") && !$0.contains("/") })
+        let priceCol = header.firstIndex(where: { $0.hasPrefix("cost/") || $0.contains("price") })
+        let totalCol = header.firstIndex(of: "total cost")
+        let notesCol = columnIndex(in: header, matching: ["notes", "note"]) ?? columnIndex(in: header, matching: ["tags"])
         let partialCol = columnIndex(in: header, matching: ["partial"])
+        let filledUpCol = header.firstIndex(where: { $0 == "filled up" || $0 == "filled_up" })
         let latCol = columnIndex(in: header, matching: ["latitude"])
         let lonCol = columnIndex(in: header, matching: ["longitude", "long"])
         let brandCol = columnIndex(in: header, matching: ["brand", "station", "fueling station"])
         let unit: FuelUnit = header.contains(where: { $0.contains("gallon") }) ? .gallons : .liters
+        guard let volCol else { return }
 
         let existingVehicles = (try? modelContext.fetch(FetchDescriptor<Vehicle>())) ?? []
-        var vehiclesByName = Dictionary(uniqueKeysWithValues: existingVehicles.map { ($0.name, $0) })
+        var vehiclesByName = Dictionary(existingVehicles.map { ($0.name, $0) }, uniquingKeysWith: { first, _ in first })
         var existingLocations = (try? modelContext.fetch(FetchDescriptor<GasLocation>())) ?? []
         let total = Double(max(1, rows.count - 1))
 
         for (index, row) in rows.dropFirst().enumerated() {
             if index % 20 == 0 { importProgress = Double(index) / total; try? await Task.sleep(nanoseconds: 10_000_000) }
             let name = field(row, vehicleCol).trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !name.isEmpty, let date = parseFlexibleDate(field(row, dateCol)) else { continue }
+            let dateText = field(row, dateCol).trimmingCharacters(in: .whitespacesAndNewlines)
+            let timeText = field(row, timeCol).trimmingCharacters(in: .whitespacesAndNewlines)
+            // With a time column, "2024-04-19 10:57 AM" keeps same-day fill-ups
+            // distinct; fall back to the bare date if the time won't parse.
+            guard !name.isEmpty,
+                  let date = (timeText.isEmpty ? nil : parseFlexibleDate("\(dateText) \(timeText)")) ?? parseFlexibleDate(dateText) else { continue }
+
+            // Rows without fuel (Fuelly also exports service rows in this
+            // file) are skipped before a vehicle is created for them.
+            let vol = parseNumber(field(row, volCol)) ?? 0
+            guard vol > 0 else { continue }
 
             let vehicle: Vehicle
             if let existing = vehiclesByName[name] {
@@ -178,12 +225,17 @@ class CSVImporter: ObservableObject {
                 modelContext.insert(Trip(name: "Since Day One - \(name)", startDate: .distantPast, endDate: .distantFuture, vehicle: vehicle))
             }
 
-            let vol = Double(field(row, volCol).replacingOccurrences(of: ",", with: "")) ?? 0
-            guard vol > 0 else { continue }
-            let price = Double(field(row, priceCol).replacingOccurrences(of: ",", with: "")) ?? 0
-            let odo = Double(field(row, odoCol).replacingOccurrences(of: ",", with: ""))
-            let partial = field(row, partialCol).lowercased()
-            let isFull = !(["1", "yes", "true"].contains(partial))
+            var price = parseNumber(field(row, priceCol)) ?? 0
+            if price <= 0, let totalCost = parseNumber(field(row, totalCol)), totalCost > 0 { price = totalCost / vol }
+            let odo = parseNumber(field(row, odoCol))
+            let isFull: Bool
+            if let filledUpCol {
+                // Fuelly marks fill-ups Full, Partial or Reset; only Partial
+                // isn't a full tank (Reset is a full tank after a missed fill).
+                isFull = field(row, filledUpCol).lowercased() != "partial"
+            } else {
+                isFull = !(["1", "yes", "true"].contains(field(row, partialCol).lowercased()))
+            }
             let notes = field(row, notesCol)
             let brandName = field(row, brandCol).trimmingCharacters(in: .whitespacesAndNewlines)
             var loc: GasLocation? = nil
