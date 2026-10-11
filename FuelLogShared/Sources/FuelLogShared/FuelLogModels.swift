@@ -190,6 +190,17 @@ public enum EfficiencyConverter {
         return result
     }
 
+    /// kWh a charge from `start`% to `end`% would add, from the battery
+    /// capacity. Used to offer a starting value when the user knows the battery
+    /// percentages but not the kWh; nil without a capacity or a real gain.
+    public func estimatedKWh(fromSoC start: Double, toSoC end: Double) -> Double? {
+        // A plug-in hybrid has a separate battery size. A pure EV's single
+        // "Capacity (kWh)" field is stored as tankCapacity, so fall back to it.
+        let capacity = batteryCapacity ?? (fuelType == .electric ? tankCapacity : nil)
+        guard let capacity, capacity > 0, end > start else { return nil }
+        return capacity * (end - start) / 100.0
+    }
+
     // MARK: Full-tank sanity check
 
     /// A "full tank" fill-up smaller than this share of the vehicle's usual
@@ -307,11 +318,58 @@ public enum EfficiencyConverter {
     public var vehicle: Vehicle?
     public var location: GasLocation?
 
+    // EV charging session details. All optional so existing records (and every
+    // gas fill-up) migrate untouched; nil means "not recorded".
+    /// `ChargerType` raw value: home, public Level 2, or DC fast.
+    public var chargerTypeRaw: String?
+    /// Battery state of charge, in percent (0-100), when the session started/ended.
+    public var startSoC: Double?
+    public var endSoC: Double?
+    /// How long the session lasted, in minutes.
+    public var durationMinutes: Int?
+    /// Flat per-session fee charged on top of the energy (public networks).
+    public var sessionFee: Double?
+
     @Attribute(.externalStorage) public var receiptData: Data?
 
     @Transient public var unit: FuelUnit {
         get { FuelUnit(rawValue: unitRaw) ?? .gallons }
         set { unitRaw = newValue.rawValue }
+    }
+
+    @Transient public var chargerType: ChargerType? {
+        get { chargerTypeRaw.flatMap { ChargerType(rawValue: $0) } }
+        set { chargerTypeRaw = newValue?.rawValue }
+    }
+
+    /// Average power over the session, in kW: energy added divided by time.
+    /// Nil unless this is a charge with a recorded duration.
+    @Transient public var averageChargingKW: Double? {
+        guard unit == .kwh, let minutes = durationMinutes else { return nil }
+        return FillUp.averageChargingKW(kWh: volume, minutes: minutes)
+    }
+
+    /// Percentage points gained, when both ends of the session were recorded.
+    @Transient public var socGain: Double? {
+        guard let startSoC, let endSoC, endSoC > startSoC else { return nil }
+        return endSoC - startSoC
+    }
+
+    /// "38 min", "1 h", "1 h 25 min" - compact enough for a log row.
+    public static func durationText(minutes: Int) -> String {
+        let hours = minutes / 60, rest = minutes % 60
+        switch (hours, rest) {
+        case (0, _): return "\(rest) min"
+        case (_, 0): return "\(hours) h"
+        default: return "\(hours) h \(rest) min"
+        }
+    }
+
+    /// kWh / hours. Shared with the entry form so it can show the figure live,
+    /// before anything is saved.
+    public static func averageChargingKW(kWh: Double, minutes: Int) -> Double? {
+        guard kWh > 0, minutes > 0 else { return nil }
+        return kWh / (Double(minutes) / 60.0)
     }
 
     @Transient public var fuelGrade: FuelGrade? {
@@ -344,13 +402,18 @@ public enum EfficiencyConverter {
         return grade.rawValue
     }
 
-    public init(id: UUID = UUID(), date: Date = .now, odometer: Double? = nil, volume: Double, pricePerUnit: Double, isFullTank: Bool = true, notes: String = "", unit: FuelUnit = .gallons, grade: FuelGrade? = nil, vehicle: Vehicle? = nil, location: GasLocation? = nil, receiptData: Data? = nil) {
+    public init(id: UUID = UUID(), date: Date = .now, odometer: Double? = nil, volume: Double, pricePerUnit: Double, isFullTank: Bool = true, notes: String = "", unit: FuelUnit = .gallons, grade: FuelGrade? = nil, vehicle: Vehicle? = nil, location: GasLocation? = nil, receiptData: Data? = nil, chargerType: ChargerType? = nil, startSoC: Double? = nil, endSoC: Double? = nil, durationMinutes: Int? = nil, sessionFee: Double? = nil) {
         self.id = id; self.date = date; self.odometer = odometer; self.volume = volume; self.pricePerUnit = pricePerUnit; self.isFullTank = isFullTank; self.notes = notes
         self.unitRaw = unit.rawValue
         self.gradeRaw = grade?.rawValue
         self.vehicle = vehicle; self.location = location; self.receiptData = receiptData
+        self.chargerTypeRaw = chargerType?.rawValue
+        self.startSoC = startSoC; self.endSoC = endSoC; self.durationMinutes = durationMinutes; self.sessionFee = sessionFee
     }
-    @Transient public var totalCost: Double { volume * pricePerUnit }
+    /// Energy plus any flat session fee - what the session actually cost. Every
+    /// total (dashboard, reports, charts) goes through this, so a fee is counted
+    /// everywhere without each caller knowing about it.
+    @Transient public var totalCost: Double { volume * pricePerUnit + (sessionFee ?? 0) }
 }
 
 // MARK: - ServiceRecord

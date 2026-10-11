@@ -23,6 +23,9 @@ struct AddFillUpView: View {
     var entryMode: FillUpEntryMode? = nil
     
     private var isChargeMode: Bool {
+        // A new log for an electric vehicle is always a charge, whatever way the
+        // form was opened (quick action, shortcut, the dashboard button...).
+        if vehicle.fuelType == .electric, editingFillUp == nil { return true }
         if let entryMode { return entryMode == .charge }
         if let f = editingFillUp { return f.unit == .kwh }
         return vehicle.fuelType == .electric
@@ -49,6 +52,13 @@ struct AddFillUpView: View {
     @State private var pricePerUnitStr: String = ""
     @State private var totalCostStr: String = ""
     @State private var isFullTank: Bool = true
+    // EV charging session details (charge mode only).
+    @State private var chargerType: ChargerType?
+    @State private var startSoCStr: String = ""
+    @State private var endSoCStr: String = ""
+    @State private var hoursStr: String = ""
+    @State private var minutesStr: String = ""
+    @State private var sessionFeeStr: String = ""
     @State private var fuelGrade: FuelGrade?
     @State private var customGradeLabel: String = ""
     @State private var notes: String = ""
@@ -96,6 +106,50 @@ struct AddFillUpView: View {
         return Array(suggestions.prefix(15))
     }
 
+    // MARK: EV charging session helpers
+
+    /// A flat per-session fee applies to public chargers only (and to an
+    /// unspecified type, which could be one); a home charger never has one.
+    private var sessionFeeApplies: Bool { isChargeMode && chargerType != .home }
+
+    private var sessionFeeValue: Double {
+        guard sessionFeeApplies else { return 0 }
+        return max(0, Double(sessionFeeStr.replacingOccurrences(of: ",", with: ".")) ?? 0)
+    }
+
+    private var durationMinutesValue: Int? {
+        let hours = Int(hoursStr) ?? 0
+        let minutes = Int(minutesStr) ?? 0
+        let total = max(0, hours) * 60 + max(0, minutes)
+        return total > 0 ? total : nil
+    }
+
+    /// Battery percentages, clamped to a real 0-100 range.
+    private func parsedSoC(_ text: String) -> Double? {
+        guard let value = Double(text.replacingOccurrences(of: ",", with: ".")) else { return nil }
+        return min(max(value, 0), 100)
+    }
+    private var startSoCValue: Double? { parsedSoC(startSoCStr) }
+    private var endSoCValue: Double? { parsedSoC(endSoCStr) }
+
+    /// Average charging speed for what's been typed so far, shown live.
+    private var liveAverageKW: Double? {
+        guard isChargeMode, let kWh = enteredVolumeInVehicleUnit, let minutes = durationMinutesValue else { return nil }
+        return FillUp.averageChargingKW(kWh: kWh, minutes: minutes)
+    }
+
+    /// kWh implied by the battery percentages and the vehicle's battery size,
+    /// offered when no kWh has been entered yet.
+    private var estimatedKWhFromSoC: Double? {
+        guard let start = startSoCValue, let end = endSoCValue else { return nil }
+        return vehicle.estimatedKWh(fromSoC: start, toSoC: end)
+    }
+
+    private var socOrderIsWrong: Bool {
+        if let start = startSoCValue, let end = endSoCValue { return end <= start }
+        return false
+    }
+
     /// The volume being entered, in the vehicle's own fuel unit - converted
     /// from the foreign unit for a cross-border fill, and derived from total /
     /// price when volume itself wasn't typed (matching `saveFillUp`).
@@ -104,7 +158,7 @@ struct AddFillUpView: View {
         let derived: Double? = {
             guard let total = Double(totalCostStr.replacingOccurrences(of: ",", with: ".")),
                   let price = Double(pricePerUnitStr.replacingOccurrences(of: ",", with: ".")), price > 0 else { return nil }
-            return total / price
+            return max(0, total - sessionFeeValue) / price
         }()
         guard var vol = typed ?? derived, vol > 0 else { return nil }
         if isCrossBorder, foreignUnit != vehicle.fuelUnit {
@@ -286,6 +340,38 @@ struct AddFillUpView: View {
                     }
                 }
             }
+            if isChargeMode {
+                Section("Charging Session") {
+                    Picker("Charger Type", selection: $chargerType) {
+                        Text("Not Recorded").tag(nil as ChargerType?)
+                        ForEach(ChargerType.allCases) { type in
+                            Label(type.rawValue, systemImage: type.systemImage).tag(type as ChargerType?)
+                        }
+                    }
+                    FormTextField(title: "Battery Start (%)", placeholder: "e.g., 20", text: $startSoCStr, keyboardType: .decimalPad)
+                    FormTextField(title: "Battery End (%)", placeholder: "e.g., 80", text: $endSoCStr, keyboardType: .decimalPad)
+                    if socOrderIsWrong {
+                        Label("End % should be higher than start %.", systemImage: "exclamationmark.triangle.fill")
+                            .font(.footnote).foregroundStyle(.orange)
+                    }
+                    if volumeStr.isEmpty, let estimate = estimatedKWhFromSoC {
+                        Button("Estimate \(String(format: "%.1f", estimate)) kWh from battery %") {
+                            volumeStr = formatNumber(estimate)
+                            fieldEdited(.volume)
+                        }
+                        .buttonStyle(.borderless)
+                    }
+                    FormTextField(title: "Hours", placeholder: "0", text: $hoursStr, keyboardType: .numberPad)
+                    FormTextField(title: "Minutes", placeholder: "0", text: $minutesStr, keyboardType: .numberPad)
+                    if sessionFeeApplies {
+                        FormTextField(title: "Session Fee (\(vehicle.currency.rawValue))", placeholder: "0.00", text: $sessionFeeStr, keyboardType: .decimalPad)
+                            .onChange(of: sessionFeeStr) { _, _ in recalculateFields() }
+                    }
+                    if let kw = liveAverageKW {
+                        LabeledContent("Average Speed", value: String(format: "%.1f kW", kw))
+                    }
+                }
+            }
             Section("Notes") { TextEditor(text: $notes).frame(minHeight: 80) }
         }
         .navigationTitle(editingFillUp == nil ? (isChargeMode ? "Log Charge" : "Log Fuel") : "Edit Log").navigationBarTitleDisplayMode(.inline)
@@ -336,8 +422,16 @@ struct AddFillUpView: View {
                 if let o = f.odometer { odometerStr = o.odometerString }
                 volumeStr = "\(f.volume)"
                 pricePerUnitStr = "\(f.pricePerUnit)"
-                totalCostStr = String(format: "%.2f", f.volume * f.pricePerUnit)
+                totalCostStr = String(format: "%.2f", f.totalCost)
                 isFullTank = f.isFullTank
+                chargerType = f.chargerType
+                if let v = f.startSoC { startSoCStr = formatNumber(v) }
+                if let v = f.endSoC { endSoCStr = formatNumber(v) }
+                if let minutes = f.durationMinutes {
+                    hoursStr = minutes >= 60 ? String(minutes / 60) : ""
+                    minutesStr = minutes % 60 > 0 ? String(minutes % 60) : ""
+                }
+                if let fee = f.sessionFee, fee > 0 { sessionFeeStr = formatNumber(fee, isCurrency: true) }
                 fuelGrade = f.fuelGrade
                 customGradeLabel = f.customGradeLabel ?? ""
                 notes = f.notes
@@ -443,20 +537,20 @@ struct AddFillUpView: View {
         
         switch targetField {
         case .volume:
-            if let t = total, let p = price, p > 0 {
-                volumeStr = formatNumber(t / p)
+            if let t = total, let p = price, p > 0, t - sessionFeeValue > 0 {
+                volumeStr = formatNumber((t - sessionFeeValue) / p)
             } else if (changing == .totalCost && total == nil) || (changing == .price && price == nil) {
                 volumeStr = ""
             }
         case .price:
             if let t = total, let v = vol, v > 0 {
-                pricePerUnitStr = formatNumber(t / v)
+                pricePerUnitStr = formatNumber(max(0, t - sessionFeeValue) / v)
             } else if (changing == .totalCost && total == nil) || (changing == .volume && vol == nil) {
                 pricePerUnitStr = ""
             }
         case .totalCost:
             if let v = vol, let p = price {
-                totalCostStr = formatNumber(v * p, isCurrency: true)
+                totalCostStr = formatNumber(v * p + sessionFeeValue, isCurrency: true)
             } else if (changing == .volume && vol == nil) || (changing == .price && price == nil) {
                 totalCostStr = ""
             }
@@ -512,11 +606,15 @@ struct AddFillUpView: View {
         let exRate = Double(exchangeRateStr.replacingOccurrences(of: ",", with: ".")) ?? 1.0
         
         // Derive the missing value if the user didn't enter all three.
+        // The Total Cost field is the all-in amount paid, so any session fee
+        // comes out before the per-kWh price is derived from it.
+        let fee = sessionFeeValue
         if tc > 0 {
-            if vol > 0 && ppu == 0 { ppu = tc / vol }
-            else if ppu > 0 && vol == 0 { vol = tc / ppu }
+            let energyCost = max(0, tc - fee)
+            if vol > 0 && ppu == 0 { ppu = energyCost / vol }
+            else if ppu > 0 && vol == 0 { vol = energyCost / ppu }
         }
-        if tc == 0 && vol > 0 && ppu > 0 { tc = vol * ppu }
+        if tc == 0 && vol > 0 && ppu > 0 { tc = vol * ppu + fee }
         
         var finalVol = vol
         var finalPPU = ppu
@@ -561,6 +659,11 @@ struct AddFillUpView: View {
             f.date = date; f.odometer = odo; f.volume = finalVol; f.pricePerUnit = finalPPU; f.isFullTank = isChargeMode ? true : isFullTank; f.notes = finalNotes; f.receiptData = finalReceiptData
             f.fuelGrade = finalGrade
             f.customGradeLabel = finalGradeLabel
+            f.chargerType = isChargeMode ? chargerType : nil
+            f.startSoC = isChargeMode ? startSoCValue : nil
+            f.endSoC = isChargeMode ? endSoCValue : nil
+            f.durationMinutes = isChargeMode ? durationMinutesValue : nil
+            f.sessionFee = (isChargeMode && fee > 0) ? fee : nil
             // Point this fill-up at the right station rather than editing the
             // station itself. GasLocation is shared by every log that used it, so
             // renaming it in place renamed all of them - log Costco then Chevron,
@@ -568,7 +671,7 @@ struct AddFillUpView: View {
             f.location = resolveLocation(named: finalLocationName, latitude: latitude, longitude: longitude)
         } else {
             let newLoc = resolveLocation(named: finalLocationName, latitude: latitude, longitude: longitude)
-            let newFillUp = FillUp(date: date, odometer: odo, volume: finalVol, pricePerUnit: finalPPU, isFullTank: isChargeMode ? true : isFullTank, notes: finalNotes, unit: isChargeMode ? .kwh : vehicle.fuelUnit, grade: finalGrade, vehicle: vehicle, location: newLoc, receiptData: finalReceiptData)
+            let newFillUp = FillUp(date: date, odometer: odo, volume: finalVol, pricePerUnit: finalPPU, isFullTank: isChargeMode ? true : isFullTank, notes: finalNotes, unit: isChargeMode ? .kwh : vehicle.fuelUnit, grade: finalGrade, vehicle: vehicle, location: newLoc, receiptData: finalReceiptData, chargerType: isChargeMode ? chargerType : nil, startSoC: isChargeMode ? startSoCValue : nil, endSoC: isChargeMode ? endSoCValue : nil, durationMinutes: isChargeMode ? durationMinutesValue : nil, sessionFee: (isChargeMode && fee > 0) ? fee : nil)
             newFillUp.customGradeLabel = finalGradeLabel
             modelContext.insert(newFillUp)
             if vehicle.fillUps == nil { vehicle.fillUps = [] }
