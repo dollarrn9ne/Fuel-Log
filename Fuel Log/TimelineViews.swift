@@ -156,6 +156,15 @@ struct TimelineRow: View {
         return parts.isEmpty ? nil : parts.joined(separator: " • ")
     }
 
+    /// Set on a fuel fill-up flagged "full" whose size is far below the vehicle's
+    /// usual full tank - same rule as the warning in the Log Fuel form, so an
+    /// older partial fill left on "full" is spotted too. Edit the log to fix it.
+    var smallFullTankFlag: String? {
+        guard case .fillUp(let f) = event, f.isFullTank, f.unit != .kwh,
+              event.vehicle?.isSuspiciouslySmallFullTank(volume: f.volume, excluding: f.id) == true else { return nil }
+        return "Small for a full tank - partial fill?"
+    }
+
     var chargeSpeedText: String? {
         guard case .fillUp(let f) = event, let kw = f.averageChargingKW else { return nil }
         return String(format: "%.1f kW avg", kw)
@@ -229,6 +238,13 @@ struct TimelineRow: View {
                         Text(chargeText)
                             .font(.body.weight(.medium))
                             .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    if let flag = smallFullTankFlag {
+                        Label(flag, systemImage: "exclamationmark.triangle.fill")
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(.orange)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
