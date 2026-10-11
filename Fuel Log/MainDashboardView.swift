@@ -1422,6 +1422,15 @@ struct DashboardSheetContent: View {
 
                     Picker("Log View", selection: $selectedLogTab) { ForEach(LogTabChoice.allCases) { tab in Text(tab.rawValue).tag(tab) } }
                         .pickerStyle(.segmented)
+                        // The pill turns near-white over a pale map and the native
+                        // control's selected segment is white too, so the active tab
+                        // vanished into the track. A clearly darker track (it adapts to
+                        // dark mode, being a share of the primary colour) keeps the white
+                        // active segment distinct whatever is under the pill. The control
+                        // itself stays the native one - SwiftUI can't recolour its
+                        // selected segment for just this instance.
+                        .padding(3)
+                        .background(Color.primary.opacity(0.16), in: Capsule())
                         .padding(.horizontal, 24)
                         .padding(.bottom, 16)
 
