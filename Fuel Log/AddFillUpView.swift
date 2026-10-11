@@ -62,6 +62,8 @@ struct AddFillUpView: View {
     // Home rate plan pricing (see RatePlans.swift).
     @AppStorage(RatePlanStore.key) private var ratePlansData: Data = Data()
     @State private var selectedRatePlanID: UUID?
+    /// Once the user picks a plan themselves, changing the date no longer swaps it.
+    @State private var ratePlanPickedByHand = false
     /// Set once the user types a price or total by hand, so the plan stops
     /// overwriting it; "Use plan rate" clears it.
     @State private var planPriceOverridden = false
@@ -161,9 +163,11 @@ struct AddFillUpView: View {
 
     /// Writes the plan's blended price (and the resulting total) into the form.
     private func applyRatePlan() {
-        // A single saved plan is the obvious choice for a new home charge.
-        if isChargeMode, chargerType == .home, selectedRatePlanID == nil, editingFillUp == nil, ratePlans.count == 1 {
-            selectedRatePlanID = ratePlans[0].id
+        // A new home charge uses the one plan that applies on its date (the only
+        // plan, or the current season's), following the date until one is picked.
+        if isChargeMode, chargerType == .home, editingFillUp == nil, !ratePlanPickedByHand,
+           let match = RatePlan.bestMatch(in: ratePlans, on: date), match.id != selectedRatePlanID {
+            selectedRatePlanID = match.id
         }
         guard !planPriceOverridden, let breakdown = planBreakdown else { return }
         // Five places so kWh x price reproduces the plan's cost closely.
@@ -180,12 +184,16 @@ struct AddFillUpView: View {
 
     @ViewBuilder private var ratePlanRows: some View {
         if chargerType == .home {
-            Picker("Rate Plan", selection: Binding(get: { selectedRatePlanID }, set: { selectedRatePlanID = $0; planPriceOverridden = false; planPriceIsSaved = false })) {
+            Picker("Rate Plan", selection: Binding(get: { selectedRatePlanID }, set: { selectedRatePlanID = $0; ratePlanPickedByHand = true; planPriceOverridden = false; planPriceIsSaved = false })) {
                 Text("None").tag(nil as UUID?)
                 ForEach(ratePlans) { plan in Text(plan.name).tag(plan.id as UUID?) }
             }
             NavigationLink("Manage Rate Plans") { RatePlansView() }
             if let plan = selectedRatePlan {
+                if !plan.isActive(on: date), let season = plan.seasonText {
+                    Label("\(plan.name) is set for \(season), but this charge is dated outside it.", systemImage: "exclamationmark.triangle.fill")
+                        .font(.footnote).foregroundStyle(.orange)
+                }
                 if plan.kind == .timeOfUse, !planPriceOverridden, let breakdown = planBreakdown {
                     LabeledContent("Off-Peak", value: String(format: "%.1f kWh × %@", breakdown.offPeakKWh, RatePlan.priceText(plan.offPeakRate)))
                     LabeledContent("Peak", value: String(format: "%.1f kWh × %@", breakdown.peakKWh, RatePlan.priceText(plan.peakRate)))
