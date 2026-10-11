@@ -536,6 +536,8 @@ struct VehicleChartsView: View {
                         "Not Recorded": Color.gray
                     ])
                     .chartLegend(position: .bottom)
+                    // Keeps the first and last points off the plot's edges and clear of the axis labels.
+                    .chartXScale(range: .plotDimension(padding: 14))
                     .frame(height: 150)
                 }
             }

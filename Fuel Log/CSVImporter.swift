@@ -88,6 +88,16 @@ class CSVImporter: ObservableObject {
         var existingLocations = (try? modelContext.fetch(FetchDescriptor<GasLocation>())) ?? []
         let totalRows = Double(rows.count - 1)
 
+        // What kind of energy each vehicle's fuel rows record, so a *new* vehicle is
+        // created as electric (all kWh) or plug-in hybrid (kWh and fuel) rather than
+        // the gas default - the CSV has no vehicle-type column of its own.
+        var energyKinds: [String: (kWh: Int, fuel: Int)] = [:]
+        for row in rows.dropFirst() where row.count >= 8 && row[1] == "Fuel" {
+            var kinds = energyKinds[row[0]] ?? (0, 0)
+            if row[5].lowercased().contains("kwh") { kinds.kWh += 1 } else { kinds.fuel += 1 }
+            energyKinds[row[0]] = kinds
+        }
+
         for (index, row) in rows.dropFirst().enumerated() {
             if index % 20 == 0 { importProgress = Double(index) / totalRows; try? await Task.sleep(nanoseconds: 10_000_000) }
             guard row.count >= 8 else { continue }
@@ -99,7 +109,14 @@ class CSVImporter: ObservableObject {
             if let existing = existingVehicles.first(where: { $0.name == vehicleName }) {
                 vehicle = existing
             } else {
-                vehicle = Vehicle(name: vehicleName)
+                let kinds = energyKinds[vehicleName] ?? (0, 0)
+                if kinds.kWh > 0 && kinds.fuel == 0 {
+                    vehicle = Vehicle(name: vehicleName, fuelType: .electric, fuelUnit: .kwh, efficiencyUnit: .miPerKWh)
+                } else if kinds.kWh > 0 {
+                    vehicle = Vehicle(name: vehicleName, fuelType: .plugInHybrid)
+                } else {
+                    vehicle = Vehicle(name: vehicleName)
+                }
                 modelContext.insert(vehicle)
                 existingVehicles.append(vehicle)
                 modelContext.insert(Trip(name: "Since Day One - \(vehicleName)", startDate: .distantPast, endDate: .distantFuture, vehicle: vehicle))
