@@ -124,7 +124,7 @@ struct MonthlyReportView: View {
 
                     if hasMap {
                         // A route through the month's stops in date order, like the trip log.
-                        FlightPathMap(events: mapEvents, showLines: mapEvents.count > 1, mapStyle: .standard, bottomPadding: 0, selectedItemID: .constant(nil), position: .constant(.automatic), reservesRoomForAnnotationLabels: true)
+                        FlightPathMap(events: mapEvents, showLines: mapEvents.count > 1, mapStyle: .standard, bottomPadding: 0, selectedItemID: .constant(nil), position: .constant(.automatic), minDistance: 1500, reservesRoomForAnnotationLabels: true)
                             .frame(height: 220)
                             .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
                             .shadow(color: .black.opacity(0.1), radius: 6, y: 2)
