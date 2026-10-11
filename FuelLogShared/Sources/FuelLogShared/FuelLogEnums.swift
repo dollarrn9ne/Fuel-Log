@@ -72,6 +72,29 @@ public enum FuelUnit: String, Codable, CaseIterable, Identifiable {
     public var id: String { rawValue }
 }
 
+/// Where an EV charging session happened. Each behaves differently for cost:
+/// home uses the household's utility rate, public Level 2 usually has a
+/// per-kWh price (occasionally free), and DC fast charging works like a gas
+/// station - a brand, a per-kWh price, and sometimes a session fee.
+public enum ChargerType: String, Codable, CaseIterable, Identifiable {
+    case home = "Home"
+    case publicLevel2 = "Public Level 2"
+    case dcFast = "DC Fast"
+    public var id: String { rawValue }
+
+    public var systemImage: String {
+        switch self {
+        case .home: return "house.fill"
+        case .publicLevel2: return "bolt.fill"
+        case .dcFast: return "bolt.horizontal.fill"
+        }
+    }
+
+    /// Public networks sometimes add a flat fee per session; a home charger
+    /// never does, so the field is hidden there.
+    public var canHaveSessionFee: Bool { self != .home }
+}
+
 // MARK: - Odometer & Efficiency
 
 public enum OdometerUnit: String, Codable, CaseIterable, Identifiable {

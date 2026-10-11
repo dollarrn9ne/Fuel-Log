@@ -117,9 +117,17 @@ class CSVImporter: ObservableObject {
                 let pricePerUnit = vol > 0 ? (cost / vol) : 0
                 // Fuel Grade is an optional trailing column added later.
                 let grade = row.count > 8 ? FuelGrade(rawValue: row[8]) : nil
+                // EV charging details: optional trailing columns, empty for gas.
+                let charger = row.count > 9 ? ChargerType(rawValue: row[9]) : nil
+                let startSoC = row.count > 10 ? Double(row[10]) : nil
+                let endSoC = row.count > 11 ? Double(row[11]) : nil
+                let minutes = row.count > 12 ? Int(row[12]) : nil
+                let fee = row.count > 13 ? Double(row[13]) : nil
+                // Exported Cost is the all-in total, so the energy price excludes any session fee.
+                let energyPrice = vol > 0 ? max(0, cost - (fee ?? 0)) / vol : 0
 
                 if !(vehicle.fillUps ?? []).contains(where: { abs($0.date.timeIntervalSince(date)) < 60 && $0.volume == vol }) {
-                    modelContext.insert(FillUp(date: date, odometer: odo, volume: vol, pricePerUnit: pricePerUnit, isFullTank: true, notes: notesStr, unit: unit, grade: grade, vehicle: vehicle, location: loc))
+                    modelContext.insert(FillUp(date: date, odometer: odo, volume: vol, pricePerUnit: fee == nil ? pricePerUnit : energyPrice, isFullTank: true, notes: notesStr, unit: unit, grade: grade, vehicle: vehicle, location: loc, chargerType: charger, startSoC: startSoC, endSoC: endSoC, durationMinutes: minutes, sessionFee: fee))
                 }
             } else if recordType == "Service" {
                 let type = ServiceType(rawValue: detailsStr) ?? .general

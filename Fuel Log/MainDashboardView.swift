@@ -1964,6 +1964,10 @@ struct DashboardSheetContent: View {
             .accessibilityIdentifier("QuickAddFuel")
         } else {
             Button {
+                // An electric vehicle always logs a charge; anything else a fill-up.
+                // Without this the mode stayed at its default (.fuel) - or at
+                // whatever a plug-in hybrid last chose - and an EV opened the gas form.
+                fillUpEntryMode = vehicle.fuelType == .electric ? .charge : .fuel
                 showingAddFillUp = true
             } label: {
                 fuelPillLabel
