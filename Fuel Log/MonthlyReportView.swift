@@ -98,8 +98,17 @@ struct MonthlyReportView: View {
         vehicle.odometerUnit.rawValue.lowercased()
     }
 
+    /// Every stop this month that has a saved place - fuel or charging, and now
+    /// services too - in date order, so the route line reads like the trip log's.
     private var mapEvents: [VehicleEvent] {
-        monthFillUps.filter { ($0.location?.latitude ?? 0) != 0 }.map(VehicleEvent.fillUp)
+        let fuel = monthFillUps.filter { ($0.location?.latitude ?? 0) != 0 }.map(VehicleEvent.fillUp)
+        let service = monthServices.filter { ($0.location?.latitude ?? 0) != 0 }.map(VehicleEvent.service)
+        return (fuel + service).sorted { $0.date < $1.date }
+    }
+
+    /// How many of the month's stops (fuel and service) have no saved place.
+    private var stopsWithoutLocation: Int {
+        (monthFillUps.count + monthServices.count) - mapEvents.count
     }
 
     private var hasMap: Bool { !mapEvents.isEmpty }
@@ -114,10 +123,30 @@ struct MonthlyReportView: View {
                         .font(.title3.weight(.heavy))
 
                     if hasMap {
-                        FlightPathMap(events: mapEvents, showLines: false, mapStyle: .standard, bottomPadding: 0, selectedItemID: .constant(nil), position: .constant(.automatic), reservesRoomForAnnotationLabels: true)
+                        // A route through the month's stops in date order, like the trip log.
+                        FlightPathMap(events: mapEvents, showLines: mapEvents.count > 1, mapStyle: .standard, bottomPadding: 0, selectedItemID: .constant(nil), position: .constant(.automatic), reservesRoomForAnnotationLabels: true)
                             .frame(height: 220)
                             .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
                             .shadow(color: .black.opacity(0.1), radius: 6, y: 2)
+                        if stopsWithoutLocation > 0 {
+                            Text("\(stopsWithoutLocation) \(stopsWithoutLocation == 1 ? "stop has" : "stops have") no saved location, so \(stopsWithoutLocation == 1 ? "it isn't" : "they aren't") on the map.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    } else if hasActivity {
+                        // Imported logs and quick entries often have no place saved, which
+                        // used to hide the map with no explanation.
+                        HStack(spacing: 12) {
+                            Image(systemName: "map")
+                                .font(.title2)
+                                .foregroundStyle(.secondary)
+                            Text("Add a location to your fuel and service logs and this month's stops will appear on a map here.")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding()
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
                     }
 
                     HStack(spacing: 12) {
