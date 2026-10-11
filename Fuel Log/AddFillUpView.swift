@@ -142,7 +142,21 @@ struct AddFillUpView: View {
     /// date and time as the session start, and the duration if given.
     private var planBreakdown: RatePlan.Breakdown? {
         guard let plan = selectedRatePlan, let kWh = typedVolume else { return nil }
-        return plan.breakdown(kWh: kWh, start: date, minutes: durationMinutesValue)
+        return plan.breakdown(kWh: kWh, start: date, minutes: durationMinutesValue, householdKWhBefore: householdKWhBeforeThisCharge)
+    }
+
+    /// For a tiered plan: what the household had used by this charge in its
+    /// calendar month - the plan's baseline plus home charges logged earlier in
+    /// the month (any vehicle; the meter is shared). Zero for other plan types.
+    private var householdKWhBeforeThisCharge: Double {
+        guard let plan = selectedRatePlan, plan.isTiered else { return 0 }
+        let baseline = plan.tierBaselineKWh ?? 0
+        guard let month = Calendar.current.dateInterval(of: .month, for: date) else { return baseline }
+        let start = month.start, end = month.end
+        let inMonth = (try? modelContext.fetch(FetchDescriptor<FillUp>(predicate: #Predicate { $0.date >= start && $0.date < end }))) ?? []
+        let editingID = editingFillUp?.id
+        let earlier = inMonth.filter { $0.unit == .kwh && $0.chargerType == .home && $0.date < date && $0.id != editingID }
+        return baseline + earlier.map(\.volume).reduce(0, +)
     }
 
     /// Everything the plan's price depends on. Watched as one value so a single
@@ -166,7 +180,7 @@ struct AddFillUpView: View {
         // A new home charge uses the one plan that applies on its date (the only
         // plan, or the current season's), following the date until one is picked.
         if isChargeMode, chargerType == .home, editingFillUp == nil, !ratePlanPickedByHand,
-           let match = RatePlan.bestMatch(in: ratePlans, on: date), match.id != selectedRatePlanID {
+           let match = RatePlan.bestMatch(in: ratePlans, on: date, vehicleID: vehicle.id), match.id != selectedRatePlanID {
             selectedRatePlanID = match.id
         }
         guard !planPriceOverridden, let breakdown = planBreakdown else { return }
@@ -193,6 +207,13 @@ struct AddFillUpView: View {
                 if !plan.isActive(on: date), let season = plan.seasonText {
                     Label("\(plan.name) is set for \(season), but this charge is dated outside it.", systemImage: "exclamationmark.triangle.fill")
                         .font(.footnote).foregroundStyle(.orange)
+                }
+                if plan.isTiered, !planPriceOverridden, let breakdown = planBreakdown {
+                    ForEach(Array(breakdown.tierSlices.enumerated()).filter { $0.element.kWh > 0 }, id: \.offset) { index, slice in
+                        LabeledContent("Tier \(index + 1)", value: String(format: "%.1f kWh × %@", slice.kWh, RatePlan.priceText(slice.rate)))
+                    }
+                    Text("Tiers use the calendar month: this plan's baseline plus home charges already logged this month.")
+                        .font(.footnote).foregroundStyle(.secondary)
                 }
                 if plan.kind == .timeOfUse, !planPriceOverridden, let breakdown = planBreakdown {
                     LabeledContent("Off-Peak", value: String(format: "%.1f kWh × %@", breakdown.offPeakKWh, RatePlan.priceText(plan.offPeakRate)))
