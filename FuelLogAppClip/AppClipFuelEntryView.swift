@@ -25,6 +25,14 @@ struct AppClipFuelEntryView: View {
     @State private var isFullTank: Bool = true
     @State private var notes: String = ""
     @State private var locationName: String = ""
+    // Charging session details - own electric vehicles only; the shared-vehicle
+    // relay has no fields for them.
+    @State private var chargerType: ChargerType?
+    @State private var startSoCStr: String = ""
+    @State private var endSoCStr: String = ""
+    @State private var hoursStr: String = ""
+    @State private var minutesStr: String = ""
+    @State private var sessionFeeStr: String = ""
 
     @State private var isSubmitting = false
     @State private var submitError: String?
@@ -76,6 +84,42 @@ struct AppClipFuelEntryView: View {
         case .local(let v): return v.fuelUnit
         case .shared(let d): return d.fuelUnit
         }
+    }
+
+    /// Charging details are stored on the device, so they're only offered when
+    /// logging for the user's own electric vehicle.
+    private var showsChargingSession: Bool {
+        if case .local(let v) = mode { return v.fuelType == .electric }
+        return false
+    }
+
+    private var sessionFeeApplies: Bool { showsChargingSession && chargerType != .home }
+
+    private var sessionFeeValue: Double {
+        guard sessionFeeApplies else { return 0 }
+        return max(0, Double(sessionFeeStr.replacingOccurrences(of: ",", with: ".")) ?? 0)
+    }
+
+    private var durationMinutesValue: Int? {
+        let total = max(0, Int(hoursStr) ?? 0) * 60 + max(0, Int(minutesStr) ?? 0)
+        return total > 0 ? total : nil
+    }
+
+    /// Battery percentages, clamped to a real 0-100 range.
+    private func parsedSoC(_ text: String) -> Double? {
+        guard let value = Double(text.replacingOccurrences(of: ",", with: ".")) else { return nil }
+        return min(max(value, 0), 100)
+    }
+
+    /// Notice under the Full Tank switch when the amount is far below what the
+    /// vehicle usually takes - same rule as the main app's Log Fuel form. Only
+    /// for the user's own vehicles: a shared vehicle has no history here.
+    private var smallFullTankWarning: String? {
+        guard case .local(let vehicle) = mode, !isElectric, isFullTank,
+              let vol = Double(volumeStr.replacingOccurrences(of: ",", with: ".")),
+              vehicle.isSuspiciouslySmallFullTank(volume: vol),
+              let usual = vehicle.usualFullTankVolume() else { return nil }
+        return String(format: "%.1f %@ is much less than this vehicle's usual full tank (about %.1f). If you didn't fill it all the way, mark it as a partial fill so MPG isn't thrown off.", vol, vehicle.fuelUnit.rawValue.lowercased(), usual)
     }
 
     private var navigationTitleText: String { isElectric ? "Log Charge" : "Log Fuel" }
@@ -157,6 +201,64 @@ struct AppClipFuelEntryView: View {
                 }
                 if !isElectric {
                     Toggle("Full Tank", isOn: $isFullTank)
+                    if let warning = smallFullTankWarning {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Label(warning, systemImage: "exclamationmark.triangle.fill")
+                                .font(.footnote)
+                                .foregroundStyle(.orange)
+                            Button("Mark as Partial Fill") { isFullTank = false }
+                                .font(.footnote.weight(.semibold))
+                                .buttonStyle(.borderless)
+                        }
+                    }
+                }
+            }
+
+            if showsChargingSession {
+                Section("Charging Session") {
+                    Picker("Charger Type", selection: $chargerType) {
+                        Text("Not Recorded").tag(nil as ChargerType?)
+                        ForEach(ChargerType.allCases) { type in
+                            Label(type.rawValue, systemImage: type.systemImage).tag(type as ChargerType?)
+                        }
+                    }
+                    HStack {
+                        Text("Battery Start (%)")
+                        TextField("e.g., 20", text: $startSoCStr)
+                            .multilineTextAlignment(.trailing)
+                            .keyboardType(.decimalPad)
+                    }
+                    HStack {
+                        Text("Battery End (%)")
+                        TextField("e.g., 80", text: $endSoCStr)
+                            .multilineTextAlignment(.trailing)
+                            .keyboardType(.decimalPad)
+                    }
+                    HStack {
+                        Text("Hours")
+                        TextField("0", text: $hoursStr)
+                            .multilineTextAlignment(.trailing)
+                            .keyboardType(.numberPad)
+                    }
+                    HStack {
+                        Text("Minutes")
+                        TextField("0", text: $minutesStr)
+                            .multilineTextAlignment(.trailing)
+                            .keyboardType(.numberPad)
+                    }
+                    if sessionFeeApplies {
+                        HStack {
+                            Text("Session Fee (\(currencyLabel))")
+                            TextField("0.00", text: $sessionFeeStr)
+                                .multilineTextAlignment(.trailing)
+                                .keyboardType(.decimalPad)
+                        }
+                    }
+                    if let vol = Double(volumeStr.replacingOccurrences(of: ",", with: ".")),
+                       let minutes = durationMinutesValue,
+                       let kw = FillUp.averageChargingKW(kWh: vol, minutes: minutes) {
+                        LabeledContent("Average Speed", value: String(format: "%.1f kW", kw))
+                    }
                 }
             }
 
@@ -184,6 +286,7 @@ struct AppClipFuelEntryView: View {
         .onChange(of: volumeStr) { _, _ in recalculate() }
         .onChange(of: pricePerUnitStr) { _, _ in recalculate() }
         .onChange(of: totalCostStr) { _, _ in recalculate() }
+        .onChange(of: sessionFeeStr) { _, _ in recalculate() }
         .alert("Couldn’t Submit", isPresented: Binding(
             get: { submitError != nil },
             set: { if !$0 { submitError = nil } }
@@ -201,8 +304,9 @@ struct AppClipFuelEntryView: View {
 
         guard let v = vol, let p = ppu, let t = total else { return }
 
-        if abs(v * p - t) > 0.01 {
-            totalCostStr = String(format: "%.2f", v * p)
+        let expected = v * p + sessionFeeValue
+        if abs(expected - t) > 0.01 {
+            totalCostStr = String(format: "%.2f", expected)
         }
     }
 
@@ -215,9 +319,11 @@ struct AppClipFuelEntryView: View {
         var ppu = Double(pricePerUnitStr.replacingOccurrences(of: ",", with: ".")) ?? 0
         let tc = Double(totalCostStr.replacingOccurrences(of: ",", with: ".")) ?? 0
 
+        // Total is all-in; the price per unit excludes any session fee.
+        let net = max(0, tc - sessionFeeValue)
         if tc > 0 {
-            if vol > 0 && ppu == 0 { ppu = tc / vol }
-            else if ppu > 0 && vol == 0 { vol = tc / ppu }
+            if vol > 0 && ppu == 0 { ppu = net / vol }
+            else if ppu > 0 && vol == 0 { vol = net / ppu }
         }
 
         guard vol > 0 else { return nil }
@@ -256,7 +362,12 @@ struct AppClipFuelEntryView: View {
             unit: modelFuelUnit,
             vehicle: vehicle,
             location: location,
-            receiptData: nil
+            receiptData: nil,
+            chargerType: showsChargingSession ? chargerType : nil,
+            startSoC: showsChargingSession ? parsedSoC(startSoCStr) : nil,
+            endSoC: showsChargingSession ? parsedSoC(endSoCStr) : nil,
+            durationMinutes: showsChargingSession ? durationMinutesValue : nil,
+            sessionFee: sessionFeeValue > 0 ? sessionFeeValue : nil
         )
         modelContext.insert(fillUp)
         if vehicle.fillUps == nil { vehicle.fillUps = [] }
