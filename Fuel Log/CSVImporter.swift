@@ -123,11 +123,13 @@ class CSVImporter: ObservableObject {
                 let endSoC = row.count > 11 ? Double(row[11]) : nil
                 let minutes = row.count > 12 ? Int(row[12]) : nil
                 let fee = row.count > 13 ? Double(row[13]) : nil
+                let planName = row.count > 14 && !row[14].isEmpty ? row[14] : nil
+                let offPeak = row.count > 15 ? Double(row[15]) : nil
                 // Exported Cost is the all-in total, so the energy price excludes any session fee.
                 let energyPrice = vol > 0 ? max(0, cost - (fee ?? 0)) / vol : 0
 
                 if !(vehicle.fillUps ?? []).contains(where: { abs($0.date.timeIntervalSince(date)) < 60 && $0.volume == vol }) {
-                    modelContext.insert(FillUp(date: date, odometer: odo, volume: vol, pricePerUnit: fee == nil ? pricePerUnit : energyPrice, isFullTank: true, notes: notesStr, unit: unit, grade: grade, vehicle: vehicle, location: loc, chargerType: charger, startSoC: startSoC, endSoC: endSoC, durationMinutes: minutes, sessionFee: fee))
+                    modelContext.insert(FillUp(date: date, odometer: odo, volume: vol, pricePerUnit: fee == nil ? pricePerUnit : energyPrice, isFullTank: true, notes: notesStr, unit: unit, grade: grade, vehicle: vehicle, location: loc, chargerType: charger, startSoC: startSoC, endSoC: endSoC, durationMinutes: minutes, sessionFee: fee, ratePlanName: planName, offPeakKWh: offPeak))
                 }
             } else if recordType == "Service" {
                 let type = ServiceType(rawValue: detailsStr) ?? .general
