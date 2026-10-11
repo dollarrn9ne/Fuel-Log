@@ -329,6 +329,11 @@ public enum EfficiencyConverter {
     public var durationMinutes: Int?
     /// Flat per-session fee charged on top of the energy (public networks).
     public var sessionFee: Double?
+    /// Name of the home rate plan this charge was priced with, and how many of
+    /// its kWh fell in the off-peak window. `pricePerUnit` already holds the
+    /// blended result, so totals never depend on the plan still existing.
+    public var ratePlanName: String?
+    public var offPeakKWh: Double?
 
     @Attribute(.externalStorage) public var receiptData: Data?
 
@@ -402,13 +407,14 @@ public enum EfficiencyConverter {
         return grade.rawValue
     }
 
-    public init(id: UUID = UUID(), date: Date = .now, odometer: Double? = nil, volume: Double, pricePerUnit: Double, isFullTank: Bool = true, notes: String = "", unit: FuelUnit = .gallons, grade: FuelGrade? = nil, vehicle: Vehicle? = nil, location: GasLocation? = nil, receiptData: Data? = nil, chargerType: ChargerType? = nil, startSoC: Double? = nil, endSoC: Double? = nil, durationMinutes: Int? = nil, sessionFee: Double? = nil) {
+    public init(id: UUID = UUID(), date: Date = .now, odometer: Double? = nil, volume: Double, pricePerUnit: Double, isFullTank: Bool = true, notes: String = "", unit: FuelUnit = .gallons, grade: FuelGrade? = nil, vehicle: Vehicle? = nil, location: GasLocation? = nil, receiptData: Data? = nil, chargerType: ChargerType? = nil, startSoC: Double? = nil, endSoC: Double? = nil, durationMinutes: Int? = nil, sessionFee: Double? = nil, ratePlanName: String? = nil, offPeakKWh: Double? = nil) {
         self.id = id; self.date = date; self.odometer = odometer; self.volume = volume; self.pricePerUnit = pricePerUnit; self.isFullTank = isFullTank; self.notes = notes
         self.unitRaw = unit.rawValue
         self.gradeRaw = grade?.rawValue
         self.vehicle = vehicle; self.location = location; self.receiptData = receiptData
         self.chargerTypeRaw = chargerType?.rawValue
         self.startSoC = startSoC; self.endSoC = endSoC; self.durationMinutes = durationMinutes; self.sessionFee = sessionFee
+        self.ratePlanName = ratePlanName; self.offPeakKWh = offPeakKWh
     }
     /// Energy plus any flat session fee - what the session actually cost. Every
     /// total (dashboard, reports, charts) goes through this, so a fee is counted

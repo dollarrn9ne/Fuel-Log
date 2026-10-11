@@ -87,7 +87,7 @@ struct SettingsView: View {
     
     /// Settings categories, shown as the iPad sidebar.
     private enum SettingsSection: String, CaseIterable, Identifiable {
-        case appearance, backup, security, notifications, reports, transfer, sharing, danger, about
+        case appearance, backup, security, notifications, reports, charging, transfer, sharing, danger, about
 
         var id: String { rawValue }
 
@@ -98,6 +98,7 @@ struct SettingsView: View {
             case .security: return "Security"
             case .notifications: return "Notifications"
             case .reports: return "Reports"
+            case .charging: return "Charging Rates"
             case .transfer: return "Import & Export"
             case .sharing: return "Sharing"
             case .danger: return "Danger Zone"
@@ -112,6 +113,7 @@ struct SettingsView: View {
             case .security: return "lock.fill"
             case .notifications: return "bell.badge.fill"
             case .reports: return "doc.text.fill"
+            case .charging: return "bolt.fill"
             case .transfer: return "square.and.arrow.up.on.square.fill"
             case .sharing: return "person.2.fill"
             case .danger: return "exclamationmark.triangle.fill"
@@ -243,6 +245,7 @@ struct SettingsView: View {
                 securitySection
                 notificationsSection
                 reportsSection
+                chargingSection
                 transferSection
                 sharingSection
                 dangerSection
@@ -410,6 +413,7 @@ struct SettingsView: View {
         case .security: securitySection
         case .notifications: notificationsSection
         case .reports: reportsSection
+        case .charging: chargingSection
         case .transfer: transferSection
         case .sharing: sharingSection
         case .danger: dangerSection
@@ -601,6 +605,17 @@ struct SettingsView: View {
                 // iPad's multitasking makes that drag a real path to expect.
                 .onDrop(of: [.commaSeparatedText, .plainText], isTargeted: $isTargetingCSVDrop) { handleCSVDrop($0) }
                 .listRowBackground(isTargetingCSVDrop ? Color.accentColor.opacity(0.15) : nil)
+        }
+    }
+
+    private var chargingSection: some View {
+        Section(header: sectionHeader("Charging Rates")) {
+            NavigationLink { RatePlansView() } label: {
+                Label("Home Charging Rates", systemImage: "bolt.fill")
+            }
+            Text("Save your home electricity plan - a fixed price, or peak and off-peak prices - and charges logged at home are priced from it automatically.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
 
