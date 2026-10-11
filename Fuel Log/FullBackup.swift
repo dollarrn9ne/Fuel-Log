@@ -294,7 +294,7 @@ enum FullBackup {
         }
 
         var categories: [UUID: TripCategory] = [:]
-        if let plans = envelope.ratePlans { RatePlanStore.save(plans) }
+        if let plans = envelope.ratePlans { RatePlanStore.replaceAll(plans) }
         for c in envelope.tripCategories {
             let object = TripCategory(id: c.id, name: c.name)
             context.insert(object)

@@ -30,6 +30,9 @@ struct RatePlan: Codable, Identifiable, Equatable {
     var offPeakEndMinute: Int = 6 * 60
     /// Many utilities bill the whole weekend at the off-peak price.
     var weekendsAllOffPeak: Bool = false
+    /// When this plan was last edited, so the newest edit wins when two devices
+    /// disagree. Optional so plans saved before sync existed still decode.
+    var modifiedAt: Date?
 
     /// The result of pricing one session against a plan.
     struct Breakdown: Equatable {
@@ -100,13 +103,34 @@ struct RatePlan: Codable, Identifiable, Equatable {
     }
 }
 
-// MARK: - Storage
+// MARK: - Storage and sync
 
-/// Persists the plans as JSON in UserDefaults. Views read it through
-/// `@AppStorage(RatePlanStore.key)` so a change made in Settings shows up in an
-/// open charge form straight away.
+/// Where the plans live. The local copy is JSON in UserDefaults, which is what
+/// views read through `@AppStorage(RatePlanStore.key)`, so a change shows up in
+/// an open charge form straight away. It's mirrored to iCloud's key-value store
+/// so the same plans appear on every device signed into the account.
+///
+/// The key-value store is used instead of a new synced database model on
+/// purpose: the app already holds the key-value entitlement (so no capability or
+/// signing change), and a new model type would put the CloudKit schema and the
+/// container's wipe-and-retry fallback at risk for what is a handful of numbers.
+///
+/// Devices merge per plan: the most recently edited copy wins, a deleted plan is
+/// remembered so it doesn't reappear from a device that hasn't heard yet, and
+/// identical plans created separately on two devices collapse into one. Charges
+/// keep only the plan's *name* and the blended price, so none of that touches
+/// logged data.
 enum RatePlanStore {
     static let key = "homeChargingRatePlans"
+    private static let tombstoneKey = "homeChargingRatePlanTombstones"
+    private static let cloudKey = "homeChargingRatePlans.sync"
+
+    /// Everything that travels between devices.
+    struct SyncEnvelope: Codable, Equatable {
+        var plans: [RatePlan]
+        /// Plan id -> when it was deleted.
+        var deleted: [String: Date]
+    }
 
     static func decode(_ data: Data) -> [RatePlan] {
         (try? JSONDecoder().decode([RatePlan].self, from: data)) ?? []
@@ -120,8 +144,136 @@ enum RatePlanStore {
         decode(UserDefaults.standard.data(forKey: key) ?? Data())
     }
 
-    static func save(_ plans: [RatePlan]) {
-        UserDefaults.standard.set(encode(plans), forKey: key)
+    private static func loadTombstones() -> [String: Date] {
+        guard let data = UserDefaults.standard.data(forKey: tombstoneKey) else { return [:] }
+        return (try? JSONDecoder().decode([String: Date].self, from: data)) ?? [:]
+    }
+
+    private static var localEnvelope: SyncEnvelope {
+        SyncEnvelope(plans: load(), deleted: loadTombstones())
+    }
+
+    // MARK: Local edits
+
+    /// Adds or replaces a plan, stamping it as just edited.
+    static func upsert(_ plan: RatePlan) {
+        var edited = plan
+        edited.modifiedAt = Date()
+        var envelope = localEnvelope
+        if let index = envelope.plans.firstIndex(where: { $0.id == edited.id }) { envelope.plans[index] = edited } else { envelope.plans.append(edited) }
+        envelope.deleted[edited.id.uuidString] = nil
+        write(envelope)
+    }
+
+    static func delete(ids: Set<UUID>) {
+        var envelope = localEnvelope
+        envelope.plans.removeAll { ids.contains($0.id) }
+        for id in ids { envelope.deleted[id.uuidString] = Date() }
+        write(envelope)
+    }
+
+    /// Replaces every plan, as a backup restore does.
+    static func replaceAll(_ plans: [RatePlan]) {
+        var envelope = localEnvelope
+        let incoming = Set(plans.map(\.id))
+        for existing in envelope.plans where !incoming.contains(existing.id) { envelope.deleted[existing.id.uuidString] = Date() }
+        envelope.plans = plans.map { var plan = $0; plan.modifiedAt = Date(); return plan }
+        for plan in plans { envelope.deleted[plan.id.uuidString] = nil }
+        write(envelope)
+    }
+
+    /// Saves locally and pushes to iCloud.
+    private static func write(_ envelope: SyncEnvelope) {
+        writeLocal(envelope)
+        pushToCloud(envelope)
+    }
+
+    private static func writeLocal(_ envelope: SyncEnvelope) {
+        let sorted = envelope.plans.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        UserDefaults.standard.set(encode(sorted), forKey: key)
+        UserDefaults.standard.set(try? JSONEncoder().encode(envelope.deleted), forKey: tombstoneKey)
+    }
+
+    // MARK: iCloud
+
+    private static func pushToCloud(_ envelope: SyncEnvelope) {
+        guard let data = try? JSONEncoder().encode(envelope) else { return }
+        let store = NSUbiquitousKeyValueStore.default
+        store.set(data, forKey: cloudKey)
+        store.synchronize()
+    }
+
+    /// Merges whatever iCloud holds into the local copy, and pushes back anything
+    /// iCloud is missing. Safe to call at any time and as often as needed.
+    static func pullFromCloud() {
+        let store = NSUbiquitousKeyValueStore.default
+        store.synchronize()
+        let local = localEnvelope
+        guard let data = store.data(forKey: cloudKey),
+              let remote = try? JSONDecoder().decode(SyncEnvelope.self, from: data) else {
+            // Nothing in iCloud yet: publish what this device has.
+            if !local.plans.isEmpty || !local.deleted.isEmpty { pushToCloud(local) }
+            return
+        }
+        let merged = merge(local, remote)
+        if merged != local { writeLocal(merged) }
+        if merged != remote { pushToCloud(merged) }
+    }
+
+    /// Re-merges whenever another device changes the store. Run for the life of
+    /// the app, e.g. from a `.task`.
+    static func keepInSyncWithICloud() async {
+        pullFromCloud()
+        for await _ in NotificationCenter.default.notifications(named: NSUbiquitousKeyValueStore.didChangeExternallyNotification) {
+            pullFromCloud()
+        }
+    }
+
+    // MARK: Merge
+
+    /// Combines two devices' views of the plans. Pure, so it can be checked on its
+    /// own with fixed inputs.
+    static func merge(_ a: SyncEnvelope, _ b: SyncEnvelope) -> SyncEnvelope {
+        var deleted = a.deleted.merging(b.deleted) { max($0, $1) }
+
+        // Newest edit wins for a plan present on both sides.
+        var byID: [UUID: RatePlan] = [:]
+        for plan in a.plans + b.plans {
+            if let existing = byID[plan.id], (existing.modifiedAt ?? .distantPast) >= (plan.modifiedAt ?? .distantPast) { continue }
+            byID[plan.id] = plan
+        }
+
+        // A deletion beats a plan that hasn't been edited since.
+        for (idString, when) in deleted {
+            guard let id = UUID(uuidString: idString), let plan = byID[id] else { continue }
+            if when >= (plan.modifiedAt ?? .distantPast) { byID[id] = nil }
+        }
+
+        // The same plan entered by hand on two devices has two ids; keep one (the
+        // lowest id, so every device picks the same) and delete the other.
+        var keptForContent: [String: RatePlan] = [:]
+        for plan in byID.values.sorted(by: { $0.id.uuidString < $1.id.uuidString }) {
+            let signature = plan.contentSignature
+            if keptForContent[signature] == nil {
+                keptForContent[signature] = plan
+            } else {
+                byID[plan.id] = nil
+                deleted[plan.id.uuidString] = Date()
+            }
+        }
+
+        let plans = byID.values.sorted {
+            let order = $0.name.localizedCaseInsensitiveCompare($1.name)
+            return order == .orderedSame ? $0.id.uuidString < $1.id.uuidString : order == .orderedAscending
+        }
+        return SyncEnvelope(plans: plans, deleted: deleted)
+    }
+}
+
+extension RatePlan {
+    /// Two plans with the same signature price every session identically.
+    var contentSignature: String {
+        "\(name.lowercased())|\(kind.rawValue)|\(fixedRate)|\(peakRate)|\(offPeakRate)|\(offPeakStartMinute)|\(offPeakEndMinute)|\(weekendsAllOffPeak)"
     }
 }
 
@@ -156,9 +308,7 @@ struct RatePlansView: View {
                     }
                 }
                 .onDelete { offsets in
-                    var updated = plans
-                    updated.remove(atOffsets: offsets)
-                    storedData = RatePlanStore.encode(updated)
+                    RatePlanStore.delete(ids: Set(offsets.map { plans[$0].id }))
                 }
             } footer: {
                 Text("Plans are saved on this device. Charges already logged keep the price they were saved with if a plan changes later.")
@@ -175,9 +325,7 @@ struct RatePlansView: View {
         .sheet(item: $editing) { plan in
             NavigationStack {
                 RatePlanEditor(plan: plan) { saved in
-                    var updated = plans
-                    if let index = updated.firstIndex(where: { $0.id == saved.id }) { updated[index] = saved } else { updated.append(saved) }
-                    storedData = RatePlanStore.encode(updated)
+                    RatePlanStore.upsert(saved)
                 }
             }
         }

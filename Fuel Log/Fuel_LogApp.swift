@@ -359,9 +359,15 @@ struct Fuel_LogApp: App {
                             try? await Task.sleep(for: .seconds(20))
                         }
                     }
+                    .task {
+                        // Keeps home charging rate plans in step with the user's
+                        // other devices (iCloud key-value store).
+                        await RatePlanStore.keepInSyncWithICloud()
+                    }
                     .onChange(of: scenePhase) { _, phase in
                         if phase == .active {
                             Task { await SharedLoggingImporter.shared.importNow() }
+                            RatePlanStore.pullFromCloud()
                         }
                     }
             case .failure(let error):
