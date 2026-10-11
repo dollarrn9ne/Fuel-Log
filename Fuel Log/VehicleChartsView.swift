@@ -171,6 +171,7 @@ struct VehicleChartsView: View {
                                         statsTileGrid(columns: 3)
                                         gradeComparisonCard
                                         chargingInsightsCard
+                                        adBlueInsightsCard
                                     }
                                     .padding(.horizontal)
                                 } else {
@@ -184,6 +185,7 @@ struct VehicleChartsView: View {
                                             statsTileGrid(columns: 2)
                                             gradeComparisonCard
                                             chargingInsightsCard
+                                            adBlueInsightsCard
                                         }
                                         .frame(width: 380)
                                     }
@@ -196,6 +198,7 @@ struct VehicleChartsView: View {
                                     statsTileGrid(columns: 2)
                                     gradeComparisonCard
                                     chargingInsightsCard
+                                    adBlueInsightsCard
                                 }
                                 .padding(.horizontal)
                             }
@@ -540,6 +543,77 @@ struct VehicleChartsView: View {
                     .chartXScale(range: .plotDimension(padding: 14))
                     .frame(height: 150)
                 }
+            }
+            .padding()
+            .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
+        }
+    }
+
+    // MARK: AdBlue / DEF insights
+
+    /// How much AdBlue / DEF the vehicle uses, what that costs, and roughly how far
+    /// the tank will last. Based on every top-up (not just the chosen timeframe,
+    /// since a refill can be months apart) and shown only for a vehicle that has
+    /// AdBlue / DEF switched on and at least one top-up logged.
+    @ViewBuilder private var adBlueInsightsCard: some View {
+        let insights = AdBlueInsights(vehicle: vehicle)
+        if vehicle.usesAdBlue && insights.topUps > 0 {
+            let distanceUnit = vehicle.odometerUnit == .kilometers ? "km" : "mi"
+            let volumeUnit = vehicle.fluidUnitLabel
+            VStack(alignment: .leading, spacing: 14) {
+                Text(AdBlueNaming.name.uppercased())
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.secondary)
+
+                LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
+                    if let rate = insights.consumptionPer1000 {
+                        StatTile(icon: "drop.triangle.fill", tint: .cyan,
+                                 value: String(format: "%.2f %@", rate, volumeUnit),
+                                 label: "Use per 1,000 \(distanceUnit)")
+                    }
+                    if let cost = insights.costPer1000 {
+                        StatTile(icon: "tag.fill", tint: .orange,
+                                 value: cost.formatted(.currency(code: vehicle.currencyRaw)),
+                                 label: "Cost per 1,000 \(distanceUnit)")
+                    }
+                    StatTile(icon: "drop.fill", tint: .blue,
+                             value: String(format: "%.1f %@", insights.totalVolume, volumeUnit),
+                             label: insights.topUps == 1 ? "1 Top-up" : "\(insights.topUps) Top-ups")
+                    if let range = insights.rangeLeft {
+                        StatTile(icon: "road.lanes", tint: insights.isLow ? .red : .green,
+                                 value: "≈ \(Int((range / 100).rounded() * 100).formatted()) \(distanceUnit)",
+                                 label: "Range Left")
+                    }
+                }
+
+                if let fraction = insights.remainingFraction, let remaining = insights.remainingVolume, let capacity = vehicle.adBlueCapacity {
+                    GeometryReader { geo in
+                        ZStack(alignment: .leading) {
+                            Capsule().fill(Color.gray.opacity(0.25))
+                            Capsule().fill(insights.isLow ? Color.red : Color.cyan).frame(width: geo.size.width * min(max(fraction, 0), 1))
+                        }
+                    }
+                    .frame(height: 10)
+                    Text("About \(Int((fraction * 100).rounded()))% left (\(String(format: "%.1f", remaining)) of \(String(format: "%.1f", capacity)) \(volumeUnit))" + (insights.isLow ? " - time to top up." : "."))
+                        .font(.caption)
+                        .foregroundStyle(insights.isLow ? Color.red : Color.secondary)
+                }
+
+                // Say why something is missing instead of leaving a gap.
+                if insights.consumptionPer1000 == nil {
+                    Text("Log two top-ups that filled the tank to see how much you use.")
+                        .font(.caption).foregroundStyle(.secondary)
+                } else if vehicle.adBlueCapacity == nil {
+                    Text("Add the \(AdBlueNaming.name) tank size in Edit Vehicle for a range estimate.")
+                        .font(.caption).foregroundStyle(.secondary)
+                } else if insights.rangeLeft == nil {
+                    Text("The latest top-up didn't fill the tank, so the level can't be estimated.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+
+                Text("Use is measured between top-ups that filled the tank, so partial top-ups are counted toward the next full one.")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
             }
             .padding()
             .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))

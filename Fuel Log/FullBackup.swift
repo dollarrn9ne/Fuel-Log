@@ -101,6 +101,7 @@ struct BackupService: Codable {
     var locationID: UUID?
     var receiptData: Data?
     var volume: Double?
+    var filledToFull: Bool?
 }
 
 struct BackupGasLocation: Codable {
@@ -195,7 +196,7 @@ enum FullBackup {
                     },
                     services: (v.services ?? []).sorted { $0.date < $1.date }.map { s in
                         BackupService(id: s.id, date: s.date, odometer: s.odometer, typeRaw: s.typeRaw, cost: s.cost,
-                                      notes: s.notes, locationID: s.location?.id, receiptData: s.receiptData, volume: s.volume)
+                                      notes: s.notes, locationID: s.location?.id, receiptData: s.receiptData, volume: s.volume, filledToFull: s.filledToFull)
                     },
                     trips: (v.trips ?? []).sorted { $0.startDate < $1.startDate }.map { t in
                         BackupTrip(id: t.id, name: t.name, startDate: t.startDate, endDate: t.endDate,
@@ -350,7 +351,7 @@ enum FullBackup {
                     id: service.id, date: service.date, odometer: service.odometer,
                     type: ServiceType(rawValue: service.typeRaw) ?? .general, cost: service.cost,
                     notes: service.notes, vehicle: object, location: service.locationID.flatMap { gasLocations[$0] },
-                    receiptData: service.receiptData, volume: service.volume
+                    receiptData: service.receiptData, volume: service.volume, filledToFull: service.filledToFull
                 ))
             }
             for trip in vehicle.trips {
