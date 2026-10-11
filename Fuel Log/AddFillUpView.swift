@@ -197,11 +197,17 @@ struct AddFillUpView: View {
                 if planPriceOverridden {
                     Text(planPriceIsSaved ? "Showing the price this charge was saved with." : "Price set by hand - the plan isn't applied.")
                         .font(.footnote).foregroundStyle(.secondary)
-                    Button(planPriceIsSaved ? "Re-price from plan" : "Use plan rate") {
+                    Button {
                         focusedField = nil
                         planPriceOverridden = false
                         planPriceIsSaved = false
                         applyRatePlan()
+                    } label: {
+                        // The whole row, not just the words: a borderless button in a
+                        // Form row only responded to taps on its text.
+                        Text(planPriceIsSaved ? "Re-price from plan" : "Use plan rate")
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .contentShape(Rectangle())
                     }
                     .buttonStyle(.borderless)
                 }
