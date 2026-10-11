@@ -28,6 +28,8 @@ struct AddServiceView: View {
     @State private var costStr: String = ""
     /// Litres/gallons of AdBlue / DEF added (AdBlue top-ups only).
     @State private var volumeStr: String = ""
+    /// Did the AdBlue / DEF top-up fill the tank? Needed to measure consumption.
+    @State private var filledToFull: Bool = true
     @State private var notes: String = ""
     
     // Receipt Scanning
@@ -177,6 +179,7 @@ struct AddServiceView: View {
                 Picker("Service Type", selection: $type) { ForEach(offeredTypes) { t in Text(t.displayName).tag(t) } }
                 if type == .adBlue {
                     FormTextField(title: "\(AdBlueNaming.name) Added (\(vehicle.fluidUnitLabel))", placeholder: vehicle.fuelUnit == .gallons ? "e.g., 2.5" : "e.g., 10", text: $volumeStr, keyboardType: .decimalPad)
+                    Toggle("Topped up to full", isOn: $filledToFull)
                 }
                 FormTextField(title: "Total Cost", placeholder: "0.00", text: $costStr, keyboardType: .decimalPad)
             }
@@ -216,6 +219,7 @@ struct AddServiceView: View {
             if let s = editingService { 
                 date = s.date; locationName = s.location?.name ?? ""; latitude = s.location?.latitude ?? 0; longitude = s.location?.longitude ?? 0; odometerStr = s.odometer.odometerString; type = s.type; costStr = "\(s.cost)"; notes = s.notes
                 if let v = s.volume { volumeStr = "\(v)" }
+                filledToFull = s.filledToFull ?? true
                 if let rData = s.receiptData { scannedImage = UIImage(data: rData) }
             } else if let lastOdo = vehicle.lastOdometer { 
                 odometerStr = lastOdo.odometerString 
@@ -247,12 +251,13 @@ struct AddServiceView: View {
         if let s = editingService {
             s.date = date; s.odometer = odo; s.type = type; s.cost = cost; s.notes = notes; s.receiptData = finalReceiptData
             s.volume = type == .adBlue ? volumeValue : nil
+            s.filledToFull = type == .adBlue ? filledToFull : nil
             // Re-point rather than rename: GasLocation is shared, so editing it
             // in place renamed every other log at the same place.
             s.location = resolveLocation(named: finalLocationName, latitude: latitude, longitude: longitude)
         } else {
             let newLoc = resolveLocation(named: finalLocationName, latitude: latitude, longitude: longitude)
-            let newService = ServiceRecord(date: date, odometer: odo, type: type, cost: cost, notes: notes, vehicle: vehicle, location: newLoc, receiptData: finalReceiptData, volume: type == .adBlue ? volumeValue : nil)
+            let newService = ServiceRecord(date: date, odometer: odo, type: type, cost: cost, notes: notes, vehicle: vehicle, location: newLoc, receiptData: finalReceiptData, volume: type == .adBlue ? volumeValue : nil, filledToFull: type == .adBlue ? filledToFull : nil)
             modelContext.insert(newService)
             if vehicle.services == nil { vehicle.services = [] }
             vehicle.services?.append(newService)

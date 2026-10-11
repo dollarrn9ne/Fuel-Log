@@ -158,7 +158,8 @@ class CSVImporter: ObservableObject {
                 let type = ServiceType(rawValue: detailsStr) ?? .general
                 if !(vehicle.services ?? []).contains(where: { abs($0.date.timeIntervalSince(date)) < 60 && $0.type == type }) {
                     let fluidVolume = row.count > 16 ? Double(row[16]) : nil
-                    modelContext.insert(ServiceRecord(date: date, odometer: odo ?? 0, type: type, cost: cost, notes: notesStr, vehicle: vehicle, location: loc, volume: fluidVolume))
+                    let fullFlag: Bool? = row.count > 17 && !row[17].isEmpty ? row[17] == "1" : nil
+                    modelContext.insert(ServiceRecord(date: date, odometer: odo ?? 0, type: type, cost: cost, notes: notesStr, vehicle: vehicle, location: loc, volume: fluidVolume, filledToFull: fullFlag))
                 }
             }
         }

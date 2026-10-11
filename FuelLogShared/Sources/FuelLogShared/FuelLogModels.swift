@@ -430,6 +430,82 @@ public enum EfficiencyConverter {
     @Transient public var totalCost: Double { volume * pricePerUnit + (sessionFee ?? 0) }
 }
 
+// MARK: - AdBlue / DEF insights
+
+/// How much AdBlue / DEF a vehicle uses, what it costs, and roughly how far the
+/// tank will last. Pure over the vehicle's services, so it can be checked on its
+/// own with fixed inputs.
+///
+/// Consumption is measured between full top-ups, with any partial top-ups in
+/// between rolled into the next full one - the same method as MPG between full
+/// tanks. Measuring from the volume of every top-up regardless would be wrong
+/// whenever the tank wasn't filled to the same level each time.
+public struct AdBlueInsights {
+    /// Top-ups logged with a volume.
+    public let topUps: Int
+    public let totalVolume: Double
+    public let totalCost: Double
+    /// Volume used per 1,000 distance units (the vehicle's odometer unit). nil
+    /// until two full top-ups bracket some distance.
+    public let consumptionPer1000: Double?
+    public let costPer1000: Double?
+    /// Fluid left in the tank, from the last full top-up, the typical rate and the
+    /// distance driven since. nil unless the tank size is set and the latest
+    /// top-up filled the tank.
+    public let remainingVolume: Double?
+    public let remainingFraction: Double?
+    /// Distance the remaining fluid should cover.
+    public let rangeLeft: Double?
+
+    /// At or below this share of the tank is "low".
+    public static let lowFraction: Double = 0.2
+
+    public var isLow: Bool { (remainingFraction ?? 1) <= Self.lowFraction }
+
+    public init(vehicle: Vehicle) {
+        let services = (vehicle.services ?? [])
+            .filter { $0.type == .adBlue && ($0.volume ?? 0) > 0 }
+            .sorted { $0.date < $1.date }
+        topUps = services.count
+        totalVolume = services.map { $0.volume ?? 0 }.reduce(0, +)
+        totalCost = services.map(\.cost).reduce(0, +)
+
+        var distance = 0.0, volume = 0.0, cost = 0.0
+        var lastFullOdometer: Double? = nil
+        var volumeSince = 0.0, costSince = 0.0
+        for service in services {
+            volumeSince += service.volume ?? 0
+            costSince += service.cost
+            guard service.filledToFull ?? true else { continue }
+            if let previous = lastFullOdometer, service.odometer > previous {
+                distance += service.odometer - previous
+                volume += volumeSince
+                cost += costSince
+            }
+            lastFullOdometer = service.odometer
+            volumeSince = 0
+            costSince = 0
+        }
+        let rate: Double? = (distance > 0 && volume > 0) ? volume / distance * 1000 : nil
+        consumptionPer1000 = rate
+        costPer1000 = distance > 0 ? cost / distance * 1000 : nil
+
+        if let rate, let capacity = vehicle.adBlueCapacity, capacity > 0,
+           let last = services.last, last.filledToFull ?? true {
+            let current = max(vehicle.lastOdometer ?? last.odometer, last.odometer)
+            let used = rate / 1000 * (current - last.odometer)
+            let remaining = max(0, capacity - used)
+            remainingVolume = remaining
+            remainingFraction = remaining / capacity
+            rangeLeft = remaining / (rate / 1000)
+        } else {
+            remainingVolume = nil
+            remainingFraction = nil
+            rangeLeft = nil
+        }
+    }
+}
+
 // MARK: - Charging insights
 
 /// Summary figures over a set of EV charging sessions: how much energy, what it
@@ -528,6 +604,10 @@ public struct ChargingInsights {
     /// Litres or gallons of fluid added, for an AdBlue / DEF top-up (the vehicle's
     /// fuel unit). nil for every other kind of service.
     public var volume: Double?
+    /// Whether an AdBlue / DEF top-up filled the tank. Consumption can only be
+    /// measured between full top-ups (the same idea as MPG between full tanks).
+    /// nil means not recorded, which is treated as full.
+    public var filledToFull: Bool?
 
     @Attribute(.externalStorage) public var receiptData: Data?
 
@@ -536,11 +616,11 @@ public struct ChargingInsights {
         set { typeRaw = newValue.rawValue }
     }
 
-    public init(id: UUID = UUID(), date: Date = .now, odometer: Double, type: ServiceType, cost: Double, notes: String = "", vehicle: Vehicle? = nil, location: GasLocation? = nil, receiptData: Data? = nil, volume: Double? = nil) {
+    public init(id: UUID = UUID(), date: Date = .now, odometer: Double, type: ServiceType, cost: Double, notes: String = "", vehicle: Vehicle? = nil, location: GasLocation? = nil, receiptData: Data? = nil, volume: Double? = nil, filledToFull: Bool? = nil) {
         self.id = id; self.date = date; self.odometer = odometer
         self.typeRaw = type.rawValue
         self.cost = cost; self.notes = notes; self.vehicle = vehicle; self.location = location; self.receiptData = receiptData
-        self.volume = volume
+        self.volume = volume; self.filledToFull = filledToFull
     }
 }
 
