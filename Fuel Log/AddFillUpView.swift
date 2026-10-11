@@ -59,6 +59,12 @@ struct AddFillUpView: View {
     @State private var hoursStr: String = ""
     @State private var minutesStr: String = ""
     @State private var sessionFeeStr: String = ""
+    // Home rate plan pricing (see RatePlans.swift).
+    @AppStorage(RatePlanStore.key) private var ratePlansData: Data = Data()
+    @State private var selectedRatePlanID: UUID?
+    /// Set once the user types a price or total by hand, so the plan stops
+    /// overwriting it; "Use plan rate" clears it.
+    @State private var planPriceOverridden = false
     @State private var fuelGrade: FuelGrade?
     @State private var customGradeLabel: String = ""
     @State private var notes: String = ""
@@ -104,6 +110,84 @@ struct AddFillUpView: View {
         }
         
         return Array(suggestions.prefix(15))
+    }
+
+    // MARK: Home rate plan helpers
+
+    private var ratePlans: [RatePlan] { RatePlanStore.decode(ratePlansData) }
+
+    /// Only home charging is priced from a plan.
+    private var selectedRatePlan: RatePlan? {
+        guard isChargeMode, chargerType == .home, let id = selectedRatePlanID else { return nil }
+        return ratePlans.first { $0.id == id }
+    }
+
+    private var typedVolume: Double? {
+        guard let value = Double(volumeStr.replacingOccurrences(of: ",", with: ".")), value > 0 else { return nil }
+        return value
+    }
+
+    /// The selected plan applied to what's been entered: kWh typed, the log's
+    /// date and time as the session start, and the duration if given.
+    private var planBreakdown: RatePlan.Breakdown? {
+        guard let plan = selectedRatePlan, let kWh = typedVolume else { return nil }
+        return plan.breakdown(kWh: kWh, start: date, minutes: durationMinutesValue)
+    }
+
+    /// Everything the plan's price depends on. Watched as one value so a single
+    /// modifier re-applies the plan, rather than a pile of `onChange`s on an
+    /// already large body.
+    private struct RatePlanInputs: Equatable {
+        var volume: String
+        var date: Date
+        var hours: String
+        var minutes: String
+        var planID: UUID?
+        var charger: ChargerType?
+    }
+
+    private var ratePlanInputs: RatePlanInputs {
+        RatePlanInputs(volume: volumeStr, date: date, hours: hoursStr, minutes: minutesStr, planID: selectedRatePlanID, charger: chargerType)
+    }
+
+    /// Writes the plan's blended price (and the resulting total) into the form.
+    private func applyRatePlan() {
+        // A single saved plan is the obvious choice for a new home charge.
+        if isChargeMode, chargerType == .home, selectedRatePlanID == nil, editingFillUp == nil, ratePlans.count == 1 {
+            selectedRatePlanID = ratePlans[0].id
+        }
+        guard !planPriceOverridden, let breakdown = planBreakdown else { return }
+        // Five places so kWh x price reproduces the plan's cost closely.
+        var rate = String(format: "%.5f", breakdown.blendedRate)
+        while rate.contains("."), rate.hasSuffix("0") { rate.removeLast() }
+        if rate.hasSuffix(".") { rate.removeLast() }
+        pricePerUnitStr = rate
+        totalCostStr = formatNumber(breakdown.cost, isCurrency: true)
+        recentEdits = [.volume, .price]
+    }
+
+    @ViewBuilder private var ratePlanRows: some View {
+        if chargerType == .home {
+            Picker("Rate Plan", selection: Binding(get: { selectedRatePlanID }, set: { selectedRatePlanID = $0; planPriceOverridden = false })) {
+                Text("None").tag(nil as UUID?)
+                ForEach(ratePlans) { plan in Text(plan.name).tag(plan.id as UUID?) }
+            }
+            NavigationLink("Manage Rate Plans") { RatePlansView() }
+            if let plan = selectedRatePlan {
+                if plan.kind == .timeOfUse, let breakdown = planBreakdown {
+                    LabeledContent("Off-Peak", value: String(format: "%.1f kWh × %@", breakdown.offPeakKWh, RatePlan.priceText(plan.offPeakRate)))
+                    LabeledContent("Peak", value: String(format: "%.1f kWh × %@", breakdown.peakKWh, RatePlan.priceText(plan.peakRate)))
+                    if durationMinutesValue == nil {
+                        Text("No duration entered, so the whole session is priced at the rate in effect when it started.")
+                            .font(.footnote).foregroundStyle(.secondary)
+                    }
+                }
+                if planPriceOverridden {
+                    Button("Use plan rate") { planPriceOverridden = false; applyRatePlan() }
+                        .buttonStyle(.borderless)
+                }
+            }
+        }
     }
 
     // MARK: EV charging session helpers
@@ -308,11 +392,11 @@ struct AddFillUpView: View {
                 
                 FormTextField(title: "Price / \(currentUnit.rawValue)", placeholder: "0.00", text: $pricePerUnitStr, keyboardType: .decimalPad)
                     .focused($focusedField, equals: .price)
-                    .onChange(of: pricePerUnitStr) { _, _ in if focusedField == .price { fieldEdited(.price) } }
+                    .onChange(of: pricePerUnitStr) { _, _ in if focusedField == .price { fieldEdited(.price); if selectedRatePlan != nil { planPriceOverridden = true } } }
                 
                 FormTextField(title: "Total Cost (\(currentCurrency.rawValue))", placeholder: "0.00", text: $totalCostStr, keyboardType: .decimalPad)
                     .focused($focusedField, equals: .totalCost)
-                    .onChange(of: totalCostStr) { _, _ in if focusedField == .totalCost { fieldEdited(.totalCost) } }
+                    .onChange(of: totalCostStr) { _, _ in if focusedField == .totalCost { fieldEdited(.totalCost); if selectedRatePlan != nil { planPriceOverridden = true } } }
                 
                 if !isChargeMode {
                     let grades = vehicle.fuelType.availableGrades
@@ -348,6 +432,7 @@ struct AddFillUpView: View {
                             Label(type.rawValue, systemImage: type.systemImage).tag(type as ChargerType?)
                         }
                     }
+                    ratePlanRows
                     FormTextField(title: "Battery Start (%)", placeholder: "e.g., 20", text: $startSoCStr, keyboardType: .decimalPad)
                     FormTextField(title: "Battery End (%)", placeholder: "e.g., 80", text: $endSoCStr, keyboardType: .decimalPad)
                     if socOrderIsWrong {
@@ -374,6 +459,7 @@ struct AddFillUpView: View {
             }
             Section("Notes") { TextEditor(text: $notes).frame(minHeight: 80) }
         }
+        .onChange(of: ratePlanInputs) { _, _ in applyRatePlan() }
         .navigationTitle(editingFillUp == nil ? (isChargeMode ? "Log Charge" : "Log Fuel") : "Edit Log").navigationBarTitleDisplayMode(.inline)
         .toolbar { 
             ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
@@ -432,6 +518,12 @@ struct AddFillUpView: View {
                     minutesStr = minutes % 60 > 0 ? String(minutes % 60) : ""
                 }
                 if let fee = f.sessionFee, fee > 0 { sessionFeeStr = formatNumber(fee, isCurrency: true) }
+                // Keep the price the log was saved with; re-pricing from a plan
+                // that may have changed since is opt-in ("Use plan rate").
+                if let name = f.ratePlanName, let plan = ratePlans.first(where: { $0.name == name }) {
+                    selectedRatePlanID = plan.id
+                    planPriceOverridden = true
+                }
                 fuelGrade = f.fuelGrade
                 customGradeLabel = f.customGradeLabel ?? ""
                 notes = f.notes
@@ -655,7 +747,24 @@ struct AddFillUpView: View {
         let trimmedGradeLabel = customGradeLabel.trimmingCharacters(in: .whitespacesAndNewlines)
         let finalGradeLabel: String? = (finalGrade == .other && !trimmedGradeLabel.isEmpty) ? trimmedGradeLabel : nil
 
+        // Which plan (if any) this charge's price came from, for the detail view.
+        var savedPlanName: String? = nil
+        var savedOffPeakKWh: Double? = nil
+        if let plan = selectedRatePlan {
+            if planPriceOverridden {
+                if let existing = editingFillUp, existing.ratePlanName == plan.name {
+                    savedPlanName = existing.ratePlanName
+                    savedOffPeakKWh = existing.offPeakKWh
+                }
+            } else if let breakdown = planBreakdown {
+                savedPlanName = plan.name
+                savedOffPeakKWh = plan.kind == .timeOfUse ? breakdown.offPeakKWh : nil
+            }
+        }
+
         if let f = editingFillUp {
+            f.ratePlanName = savedPlanName
+            f.offPeakKWh = savedOffPeakKWh
             f.date = date; f.odometer = odo; f.volume = finalVol; f.pricePerUnit = finalPPU; f.isFullTank = isChargeMode ? true : isFullTank; f.notes = finalNotes; f.receiptData = finalReceiptData
             f.fuelGrade = finalGrade
             f.customGradeLabel = finalGradeLabel
@@ -671,7 +780,7 @@ struct AddFillUpView: View {
             f.location = resolveLocation(named: finalLocationName, latitude: latitude, longitude: longitude)
         } else {
             let newLoc = resolveLocation(named: finalLocationName, latitude: latitude, longitude: longitude)
-            let newFillUp = FillUp(date: date, odometer: odo, volume: finalVol, pricePerUnit: finalPPU, isFullTank: isChargeMode ? true : isFullTank, notes: finalNotes, unit: isChargeMode ? .kwh : vehicle.fuelUnit, grade: finalGrade, vehicle: vehicle, location: newLoc, receiptData: finalReceiptData, chargerType: isChargeMode ? chargerType : nil, startSoC: isChargeMode ? startSoCValue : nil, endSoC: isChargeMode ? endSoCValue : nil, durationMinutes: isChargeMode ? durationMinutesValue : nil, sessionFee: (isChargeMode && fee > 0) ? fee : nil)
+            let newFillUp = FillUp(date: date, odometer: odo, volume: finalVol, pricePerUnit: finalPPU, isFullTank: isChargeMode ? true : isFullTank, notes: finalNotes, unit: isChargeMode ? .kwh : vehicle.fuelUnit, grade: finalGrade, vehicle: vehicle, location: newLoc, receiptData: finalReceiptData, chargerType: isChargeMode ? chargerType : nil, startSoC: isChargeMode ? startSoCValue : nil, endSoC: isChargeMode ? endSoCValue : nil, durationMinutes: isChargeMode ? durationMinutesValue : nil, sessionFee: (isChargeMode && fee > 0) ? fee : nil, ratePlanName: savedPlanName, offPeakKWh: savedOffPeakKWh)
             newFillUp.customGradeLabel = finalGradeLabel
             modelContext.insert(newFillUp)
             if vehicle.fillUps == nil { vehicle.fillUps = [] }
