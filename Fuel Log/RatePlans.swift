@@ -33,6 +33,12 @@ struct RatePlan: Codable, Identifiable, Equatable {
     /// When this plan was last edited, so the newest edit wins when two devices
     /// disagree. Optional so plans saved before sync existed still decode.
     var modifiedAt: Date?
+    /// The months (1-12) this plan applies, for a seasonal rate such as summer
+    /// and winter prices. Both nil means year-round. The range may wrap the new
+    /// year (November through March). Optional, not defaulted: a missing key
+    /// fails to decode, and plans saved before seasons existed have none.
+    var seasonStartMonth: Int?
+    var seasonEndMonth: Int?
 
     /// The result of pricing one session against a plan.
     struct Breakdown: Equatable {
@@ -40,6 +46,34 @@ struct RatePlan: Codable, Identifiable, Equatable {
         var peakKWh: Double
         var cost: Double
         var blendedRate: Double
+    }
+
+    var hasSeason: Bool { seasonStartMonth != nil && seasonEndMonth != nil }
+
+    /// Whether the plan applies in the month of `date`. Year-round plans always do.
+    func isActive(on date: Date, calendar: Calendar = .current) -> Bool {
+        guard let start = seasonStartMonth, let end = seasonEndMonth else { return true }
+        let month = calendar.component(.month, from: date)
+        if start <= end { return month >= start && month <= end }
+        return month >= start || month <= end   // wraps the new year
+    }
+
+    /// "Jun – Sep" for a seasonal plan, nil for a year-round one.
+    var seasonText: String? {
+        guard let start = seasonStartMonth, let end = seasonEndMonth,
+              (1...12).contains(start), (1...12).contains(end) else { return nil }
+        let names = Calendar.current.shortMonthSymbols
+        return start == end ? names[start - 1] : "\(names[start - 1]) – \(names[end - 1])"
+    }
+
+    /// The plan a charge on `date` should use without being asked, or nil when
+    /// there isn't a single clear one. A plan for the current season beats a
+    /// year-round one; two equally good candidates are left for the user to pick.
+    static func bestMatch(in plans: [RatePlan], on date: Date, calendar: Calendar = .current) -> RatePlan? {
+        let active = plans.filter { $0.isActive(on: date, calendar: calendar) }
+        let seasonal = active.filter(\.hasSeason)
+        let pool = seasonal.isEmpty ? active : seasonal
+        return pool.count == 1 ? pool[0] : nil
     }
 
     /// Whether the given moment is billed at the off-peak price.
@@ -273,7 +307,7 @@ enum RatePlanStore {
 extension RatePlan {
     /// Two plans with the same signature price every session identically.
     var contentSignature: String {
-        "\(name.lowercased())|\(kind.rawValue)|\(fixedRate)|\(peakRate)|\(offPeakRate)|\(offPeakStartMinute)|\(offPeakEndMinute)|\(weekendsAllOffPeak)"
+        "\(name.lowercased())|\(kind.rawValue)|\(fixedRate)|\(peakRate)|\(offPeakRate)|\(offPeakStartMinute)|\(offPeakEndMinute)|\(weekendsAllOffPeak)|\(seasonStartMonth ?? 0)|\(seasonEndMonth ?? 0)"
     }
 }
 
@@ -299,6 +333,11 @@ struct RatePlansView: View {
                         VStack(alignment: .leading, spacing: 4) {
                             Text(plan.name).font(.headline).foregroundStyle(.primary)
                             Text(plan.summary).font(.subheadline).foregroundStyle(.secondary)
+                            if let season = plan.seasonText {
+                                Text("Applies \(season)")
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                            }
                             if plan.kind == .timeOfUse {
                                 Text("Off-peak \(RatePlan.timeText(minute: plan.offPeakStartMinute)) – \(RatePlan.timeText(minute: plan.offPeakEndMinute))\(plan.weekendsAllOffPeak ? " and weekends" : "")")
                                     .font(.footnote)
@@ -399,6 +438,30 @@ private struct RatePlanEditor: View {
                 } footer: {
                     Text("Any other time is billed at the peak price. A window can run past midnight, such as 9:00 PM to 6:00 AM.")
                 }
+            }
+
+            Section {
+                Toggle("Only part of the year", isOn: Binding(
+                    get: { draft.hasSeason },
+                    set: { on in
+                        draft.seasonStartMonth = on ? 6 : nil
+                        draft.seasonEndMonth = on ? 9 : nil
+                    }
+                ))
+                if draft.hasSeason {
+                    Picker("From", selection: Binding(get: { draft.seasonStartMonth ?? 6 }, set: { draft.seasonStartMonth = $0 })) {
+                        ForEach(1...12, id: \.self) { Text(Calendar.current.monthSymbols[$0 - 1]).tag($0) }
+                    }
+                    Picker("Through", selection: Binding(get: { draft.seasonEndMonth ?? 9 }, set: { draft.seasonEndMonth = $0 })) {
+                        ForEach(1...12, id: \.self) { Text(Calendar.current.monthSymbols[$0 - 1]).tag($0) }
+                    }
+                }
+            } header: {
+                Text("Season")
+            } footer: {
+                Text(draft.hasSeason
+                     ? "Charges logged in these months use this plan automatically. Add another plan for the rest of the year, such as a winter rate. Whole months only."
+                     : "Turn on if the rate changes with the season, such as summer and winter prices.")
             }
         }
         .navigationTitle(draft.name.isEmpty ? "Rate Plan" : draft.name)
