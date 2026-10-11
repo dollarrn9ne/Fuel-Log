@@ -30,6 +30,9 @@ struct BackupEnvelope: Codable {
     var vehicles: [BackupVehicle]
     var gasLocations: [BackupGasLocation]
     var tripCategories: [BackupTripCategory]
+    /// Home charging rate plans. Optional so older backups still decode, and a
+    /// restore from one leaves the plans on the device alone.
+    var ratePlans: [RatePlan]?
 }
 
 struct BackupVehicle: Codable {
@@ -81,6 +84,8 @@ struct BackupFillUp: Codable {
     var endSoC: Double?
     var durationMinutes: Int?
     var sessionFee: Double?
+    var ratePlanName: String?
+    var offPeakKWh: Double?
 }
 
 struct BackupService: Codable {
@@ -180,7 +185,8 @@ enum FullBackup {
                                      customGradeLabel: f.customGradeLabel,
                                      locationID: f.location?.id, receiptData: f.receiptData,
                                      chargerTypeRaw: f.chargerTypeRaw, startSoC: f.startSoC, endSoC: f.endSoC,
-                                     durationMinutes: f.durationMinutes, sessionFee: f.sessionFee)
+                                     durationMinutes: f.durationMinutes, sessionFee: f.sessionFee,
+                                     ratePlanName: f.ratePlanName, offPeakKWh: f.offPeakKWh)
                     },
                     services: (v.services ?? []).sorted { $0.date < $1.date }.map { s in
                         BackupService(id: s.id, date: s.date, odometer: s.odometer, typeRaw: s.typeRaw, cost: s.cost,
@@ -193,7 +199,8 @@ enum FullBackup {
                 )
             },
             gasLocations: gasLocations.map { BackupGasLocation(id: $0.id, name: $0.name, latitude: $0.latitude, longitude: $0.longitude) },
-            tripCategories: categories.map { BackupTripCategory(id: $0.id, name: $0.name) }
+            tripCategories: categories.map { BackupTripCategory(id: $0.id, name: $0.name) },
+            ratePlans: RatePlanStore.load()
         )
         return try encoder.encode(envelope)
     }
@@ -287,6 +294,7 @@ enum FullBackup {
         }
 
         var categories: [UUID: TripCategory] = [:]
+        if let plans = envelope.ratePlans { RatePlanStore.save(plans) }
         for c in envelope.tripCategories {
             let object = TripCategory(id: c.id, name: c.name)
             context.insert(object)
@@ -324,7 +332,8 @@ enum FullBackup {
                     receiptData: fillUp.receiptData,
                     chargerType: fillUp.chargerTypeRaw.flatMap { ChargerType(rawValue: $0) },
                     startSoC: fillUp.startSoC, endSoC: fillUp.endSoC,
-                    durationMinutes: fillUp.durationMinutes, sessionFee: fillUp.sessionFee
+                    durationMinutes: fillUp.durationMinutes, sessionFee: fillUp.sessionFee,
+                    ratePlanName: fillUp.ratePlanName, offPeakKWh: fillUp.offPeakKWh
                 )
                 restoredFillUp.customGradeLabel = fillUp.customGradeLabel
                 context.insert(restoredFillUp)
