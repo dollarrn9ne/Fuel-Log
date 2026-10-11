@@ -132,7 +132,7 @@ struct TimelineRow: View {
         var parts = [event.date.formatted(date: .abbreviated, time: .omitted)]
         switch event {
         case .service(let s):
-            parts.append(s.type.rawValue)
+            parts.append(s.type.displayName)
         case .fillUp(let f):
             // Surface the grade alongside the row's efficiency figure, so a
             // lower MPG on an E85 tank is self-explanatory. Falls back to the
@@ -145,6 +145,10 @@ struct TimelineRow: View {
 
     /// "20% → 80% • 38 min" for a charge that recorded either.
     var chargeDetailText: String? {
+        // An AdBlue / DEF top-up: show how much went in.
+        if case .service(let s) = event, s.type == .adBlue, let volume = s.volume {
+            return "\(String(format: "%.1f", volume)) \(s.vehicle?.fluidUnitLabel ?? "L")"
+        }
         guard case .fillUp(let f) = event, f.unit == .kwh else { return nil }
         var parts: [String] = []
         if let start = f.startSoC, let end = f.endSoC { parts.append("\(Int(start.rounded()))% → \(Int(end.rounded()))%") }
@@ -376,7 +380,7 @@ struct RecordReadOnlyDetailView: View {
                     }
                     if !f.notes.isEmpty { Section("Notes") { Text(f.notes).font(.body) } }
                 case .service(let s):
-                    Section("Service Details") { LabeledContent("Type", value: s.type.rawValue) }
+                    Section("Service Details") { LabeledContent("Type", value: s.type.displayName); if let volume = s.volume { LabeledContent("\(AdBlueNaming.name) Added", value: "\(String(format: "%.1f", volume)) \(event.vehicle?.fluidUnitLabel ?? "L")") } }
                     if !s.notes.isEmpty { Section("Notes") { Text(s.notes).font(.body) } }
                 }
                 

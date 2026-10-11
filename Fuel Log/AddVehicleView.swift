@@ -58,6 +58,8 @@ struct AddVehicleView: View {
     @State private var currency: Currency = .usd
     @State private var tankCapacityStr: String = ""
     @State private var batteryCapacityStr: String = ""
+    @State private var usesAdBlue: Bool = false
+    @State private var adBlueCapacityStr: String = ""
     @State private var maintenanceIntervalStr: String = "5000"
     @State private var maintenanceIntervalMonthsStr: String = "6"
 
@@ -125,6 +127,13 @@ struct AddVehicleView: View {
                 if fuelType == .plugInHybrid {
                     FormTextField(title: "Capacity (kWh)", placeholder: "e.g., 8.8", text: $batteryCapacityStr, keyboardType: .decimalPad)
                 }
+                // Per vehicle, not automatic for every diesel: older ones have no SCR system.
+                if fuelType == .diesel {
+                    Toggle("Uses \(AdBlueNaming.name)", isOn: $usesAdBlue)
+                    if usesAdBlue {
+                        FormTextField(title: "\(AdBlueNaming.name) Tank (\(fuelUnit == .gallons ? "gal" : "L"))", placeholder: fuelUnit == .gallons ? "e.g., 5" : "e.g., 12", text: $adBlueCapacityStr, keyboardType: .decimalPad)
+                    }
+                }
                 Picker("Efficiency", selection: $efficiencyUnit) { ForEach(EfficiencyUnit.allCases) { u in Text(u.rawValue).tag(u) } }
                 FormTextField(title: "Maintenance Interval", placeholder: "e.g., 5000", text: $maintenanceIntervalStr, keyboardType: .numberPad)
                 FormTextField(title: "Maintenance Interval (months)", placeholder: "e.g., 6", text: $maintenanceIntervalMonthsStr, keyboardType: .numberPad)
@@ -139,6 +148,8 @@ struct AddVehicleView: View {
                 fuelType = v.fuelType; odometerUnit = v.odometerUnit; fuelUnit = v.fuelUnit; efficiencyUnit = v.efficiencyUnit; currency = v.currency; maintenanceIntervalStr = "\(Int(v.maintenanceInterval))"; maintenanceIntervalMonthsStr = "\(Int(v.maintenanceIntervalMonths))"
                 if let cap = v.tankCapacity { tankCapacityStr = "\(cap)" }
                 if let cap = v.batteryCapacity { batteryCapacityStr = "\(cap)" }
+                usesAdBlue = v.usesAdBlue
+                if let cap = v.adBlueCapacity { adBlueCapacityStr = "\(cap)" }
                 defaultGrade = v.defaultFuelGrade
                 customGradeLabel = v.customGradeLabel ?? ""
                 photoData = v.photoData
@@ -166,6 +177,9 @@ struct AddVehicleView: View {
         guard !finalName.isEmpty else { return }
         let parsedCapacity = Double(tankCapacityStr.replacingOccurrences(of: ",", with: "."))
         let parsedBatteryCapacity = Double(batteryCapacityStr.replacingOccurrences(of: ",", with: "."))
+        // Only a diesel with the switch on keeps AdBlue settings.
+        let finalUsesAdBlue = fuelType == .diesel && usesAdBlue
+        let parsedAdBlueCapacity: Double? = finalUsesAdBlue ? Double(adBlueCapacityStr.replacingOccurrences(of: ",", with: ".")) : nil
         // Only meaningful alongside the "Other" grade.
         let trimmedGradeLabel = customGradeLabel.trimmingCharacters(in: .whitespacesAndNewlines)
         let finalGradeLabel: String? = (defaultGrade == .other && !trimmedGradeLabel.isEmpty) ? trimmedGradeLabel : nil
@@ -177,6 +191,8 @@ struct AddVehicleView: View {
             v.maintenanceIntervalMonths = Double(maintenanceIntervalMonthsStr) ?? 6.0
             v.tankCapacity = parsedCapacity
             v.batteryCapacity = parsedBatteryCapacity
+            v.usesAdBlue = finalUsesAdBlue
+            v.adBlueCapacity = parsedAdBlueCapacity
             v.defaultFuelGrade = defaultGrade
             v.customGradeLabel = finalGradeLabel
             v.photoData = photoData
@@ -185,6 +201,8 @@ struct AddVehicleView: View {
             let newVehicle = Vehicle(name: finalName, make: make, model: model, year: Int(yearStr), fuelType: fuelType, odometerUnit: odometerUnit, fuelUnit: fuelUnit, efficiencyUnit: efficiencyUnit, currency: currency, tankCapacity: parsedCapacity, batteryCapacity: parsedBatteryCapacity)
             newVehicle.maintenanceInterval = Double(maintenanceIntervalStr) ?? 5000.0
             newVehicle.maintenanceIntervalMonths = Double(maintenanceIntervalMonthsStr) ?? 6.0
+            newVehicle.usesAdBlue = finalUsesAdBlue
+            newVehicle.adBlueCapacity = parsedAdBlueCapacity
             newVehicle.defaultFuelGrade = defaultGrade
             newVehicle.customGradeLabel = finalGradeLabel
             newVehicle.photoData = photoData

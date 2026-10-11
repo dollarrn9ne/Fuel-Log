@@ -134,7 +134,7 @@ public enum Currency: String, Codable, CaseIterable, Identifiable {
 
 #if canImport(AppIntents)
 public enum ServiceType: String, Codable, CaseIterable, Identifiable, Sendable, AppEnum {
-    case oilChange = "Oil Change", tires = "Tires", brakes = "Brakes", battery = "Battery", general = "General"
+    case oilChange = "Oil Change", tires = "Tires", brakes = "Brakes", battery = "Battery", general = "General", adBlue = "AdBlue / DEF"
     public var id: String { rawValue }
 
     public var icon: String {
@@ -144,6 +144,7 @@ public enum ServiceType: String, Codable, CaseIterable, Identifiable, Sendable, 
         case .brakes: return "exclamationmark.circle"
         case .battery: return "battery.100"
         case .general: return "wrench.adjustable"
+        case .adBlue: return "drop.triangle.fill"
         }
     }
 
@@ -154,6 +155,7 @@ public enum ServiceType: String, Codable, CaseIterable, Identifiable, Sendable, 
         case .brakes: return .red
         case .battery: return .green
         case .general: return .blue
+        case .adBlue: return .cyan
         }
     }
 
@@ -163,12 +165,13 @@ public enum ServiceType: String, Codable, CaseIterable, Identifiable, Sendable, 
         .tires: "Tires",
         .brakes: "Brakes",
         .battery: "Battery",
-        .general: "General"
+        .general: "General",
+        .adBlue: "AdBlue / DEF"
     ]
 }
 #else
 public enum ServiceType: String, Codable, CaseIterable, Identifiable, Sendable {
-    case oilChange = "Oil Change", tires = "Tires", brakes = "Brakes", battery = "Battery", general = "General"
+    case oilChange = "Oil Change", tires = "Tires", brakes = "Brakes", battery = "Battery", general = "General", adBlue = "AdBlue / DEF"
     public var id: String { rawValue }
 
     public var icon: String {
@@ -178,6 +181,7 @@ public enum ServiceType: String, Codable, CaseIterable, Identifiable, Sendable {
         case .brakes: return "exclamationmark.circle"
         case .battery: return "battery.100"
         case .general: return "wrench.adjustable"
+        case .adBlue: return "drop.triangle.fill"
         }
     }
 
@@ -188,10 +192,36 @@ public enum ServiceType: String, Codable, CaseIterable, Identifiable, Sendable {
         case .brakes: return .red
         case .battery: return .green
         case .general: return .blue
+        case .adBlue: return .cyan
         }
     }
 }
 #endif
+
+// MARK: - AdBlue / DEF
+
+/// The same urea solution is sold as "AdBlue" in Europe, Australia and most of
+/// the world, and as "DEF" (Diesel Exhaust Fluid) in the US and Canada. The
+/// stored value is neutral ("AdBlue / DEF"); only what the user sees follows
+/// their region.
+public enum AdBlueNaming {
+    private static let defRegions: Set<String> = ["US", "CA", "PR", "GU", "VI", "AS", "MP"]
+
+    /// The short name for the user's region.
+    public static var name: String { name(forRegion: Locale.current.region?.identifier) }
+
+    /// The name for a region code ("US", "DE", ...). Anywhere not known to say
+    /// "DEF" - including no region at all - says "AdBlue".
+    public static func name(forRegion region: String?) -> String {
+        guard let region else { return "AdBlue" }
+        return defRegions.contains(region.uppercased()) ? "DEF" : "AdBlue"
+    }
+}
+
+public extension ServiceType {
+    /// What to call this type on screen. Everything but AdBlue is its own name.
+    var displayName: String { self == .adBlue ? AdBlueNaming.name : rawValue }
+}
 
 // MARK: - Import / Export
 

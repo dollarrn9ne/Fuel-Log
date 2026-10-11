@@ -53,6 +53,11 @@ public enum EfficiencyConverter {
     public var customGradeLabel: String?
     public var tankCapacity: Double?
     public var batteryCapacity: Double?
+    /// Whether this vehicle has an SCR system that takes AdBlue / DEF. Off by
+    /// default: older diesels don't have one, so it's a per-vehicle choice.
+    public var usesAdBlue: Bool = false
+    /// Size of the AdBlue / DEF tank, in the vehicle's fuel unit (litres or gallons).
+    public var adBlueCapacity: Double?
 
     public var maintenanceInterval: Double = 5000.0
     public var maintenanceIntervalMonths: Double = 6.0
@@ -200,6 +205,9 @@ public enum EfficiencyConverter {
         guard let capacity, capacity > 0, end > start else { return nil }
         return capacity * (end - start) / 100.0
     }
+
+    /// "L" or "gal" for AdBlue / DEF volumes, following the vehicle's fuel unit.
+    public var fluidUnitLabel: String { fuelUnit == .gallons ? "gal" : "L" }
 
     // MARK: Full-tank sanity check
 
@@ -517,6 +525,9 @@ public struct ChargingInsights {
     public var notes: String = ""
     public var vehicle: Vehicle?
     public var location: GasLocation?
+    /// Litres or gallons of fluid added, for an AdBlue / DEF top-up (the vehicle's
+    /// fuel unit). nil for every other kind of service.
+    public var volume: Double?
 
     @Attribute(.externalStorage) public var receiptData: Data?
 
@@ -525,10 +536,11 @@ public struct ChargingInsights {
         set { typeRaw = newValue.rawValue }
     }
 
-    public init(id: UUID = UUID(), date: Date = .now, odometer: Double, type: ServiceType, cost: Double, notes: String = "", vehicle: Vehicle? = nil, location: GasLocation? = nil, receiptData: Data? = nil) {
+    public init(id: UUID = UUID(), date: Date = .now, odometer: Double, type: ServiceType, cost: Double, notes: String = "", vehicle: Vehicle? = nil, location: GasLocation? = nil, receiptData: Data? = nil, volume: Double? = nil) {
         self.id = id; self.date = date; self.odometer = odometer
         self.typeRaw = type.rawValue
         self.cost = cost; self.notes = notes; self.vehicle = vehicle; self.location = location; self.receiptData = receiptData
+        self.volume = volume
     }
 }
 
