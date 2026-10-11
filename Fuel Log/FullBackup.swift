@@ -74,6 +74,13 @@ struct BackupFillUp: Codable {
     var customGradeLabel: String?
     var locationID: UUID?
     var receiptData: Data?
+    // EV charging session details. Optional so backups written before they
+    // existed still decode.
+    var chargerTypeRaw: String?
+    var startSoC: Double?
+    var endSoC: Double?
+    var durationMinutes: Int?
+    var sessionFee: Double?
 }
 
 struct BackupService: Codable {
@@ -171,7 +178,9 @@ enum FullBackup {
                         BackupFillUp(id: f.id, date: f.date, odometer: f.odometer, volume: f.volume, pricePerUnit: f.pricePerUnit,
                                      isFullTank: f.isFullTank, notes: f.notes, unitRaw: f.unitRaw, gradeRaw: f.gradeRaw,
                                      customGradeLabel: f.customGradeLabel,
-                                     locationID: f.location?.id, receiptData: f.receiptData)
+                                     locationID: f.location?.id, receiptData: f.receiptData,
+                                     chargerTypeRaw: f.chargerTypeRaw, startSoC: f.startSoC, endSoC: f.endSoC,
+                                     durationMinutes: f.durationMinutes, sessionFee: f.sessionFee)
                     },
                     services: (v.services ?? []).sorted { $0.date < $1.date }.map { s in
                         BackupService(id: s.id, date: s.date, odometer: s.odometer, typeRaw: s.typeRaw, cost: s.cost,
@@ -312,7 +321,10 @@ enum FullBackup {
                     unit: FuelUnit(rawValue: fillUp.unitRaw) ?? .gallons,
                     grade: fillUp.gradeRaw.flatMap { FuelGrade(rawValue: $0) },
                     vehicle: object, location: fillUp.locationID.flatMap { gasLocations[$0] },
-                    receiptData: fillUp.receiptData
+                    receiptData: fillUp.receiptData,
+                    chargerType: fillUp.chargerTypeRaw.flatMap { ChargerType(rawValue: $0) },
+                    startSoC: fillUp.startSoC, endSoC: fillUp.endSoC,
+                    durationMinutes: fillUp.durationMinutes, sessionFee: fillUp.sessionFee
                 )
                 restoredFillUp.customGradeLabel = fillUp.customGradeLabel
                 context.insert(restoredFillUp)

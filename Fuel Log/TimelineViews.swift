@@ -138,8 +138,23 @@ struct TimelineRow: View {
             // lower MPG on an E85 tank is self-explanatory. Falls back to the
             // vehicle's usual grade for entries logged before grade tracking.
             if let gradeName = f.effectiveGradeName { parts.append(gradeName) }
+            if let charger = f.chargerType { parts.append(charger.rawValue) }
         }
         return parts.joined(separator: " • ")
+    }
+
+    /// "20% → 80% • 38 min" for a charge that recorded either.
+    var chargeDetailText: String? {
+        guard case .fillUp(let f) = event, f.unit == .kwh else { return nil }
+        var parts: [String] = []
+        if let start = f.startSoC, let end = f.endSoC { parts.append("\(Int(start.rounded()))% → \(Int(end.rounded()))%") }
+        if let minutes = f.durationMinutes { parts.append(FillUp.durationText(minutes: minutes)) }
+        return parts.isEmpty ? nil : parts.joined(separator: " • ")
+    }
+
+    var chargeSpeedText: String? {
+        guard case .fillUp(let f) = event, let kw = f.averageChargingKW else { return nil }
+        return String(format: "%.1f kW avg", kw)
     }
     
     var tripDistanceText: String? {
@@ -205,6 +220,13 @@ struct TimelineRow: View {
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
+
+                    if let chargeText = chargeDetailText {
+                        Text(chargeText)
+                            .font(.body.weight(.medium))
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
                 
                 Spacer()
@@ -217,6 +239,13 @@ struct TimelineRow: View {
                     
                     if let mpgText = tripEfficiencyText {
                         Text(mpgText)
+                            .font(.body.weight(.bold))
+                            .foregroundStyle(.secondary)
+                            .monospacedDigit()
+                    }
+
+                    if let speedText = chargeSpeedText {
+                        Text(speedText)
                             .font(.body.weight(.bold))
                             .foregroundStyle(.secondary)
                             .monospacedDigit()
@@ -331,6 +360,15 @@ struct RecordReadOnlyDetailView: View {
                 switch event {
                 case .fillUp(let f):
                     Section("Fuel Details") { LabeledContent("Volume", value: "\(f.volume) \(f.unit.rawValue)"); if let gradeName = f.effectiveGradeName { LabeledContent("Fuel Grade", value: gradeName) };LabeledContent("Price per Unit", value: f.pricePerUnit.formatted(.currency(code: event.vehicle?.currencyRaw ?? "USD"))); if f.isFullTank { LabeledContent("Fill Type", value: "Full Tank") } }
+                    if f.unit == .kwh, f.chargerType != nil || f.startSoC != nil || f.durationMinutes != nil || (f.sessionFee ?? 0) > 0 {
+                        Section("Charging Session") {
+                            if let charger = f.chargerType { LabeledContent("Charger Type", value: charger.rawValue) }
+                            if let start = f.startSoC, let end = f.endSoC { LabeledContent("Battery", value: "\(Int(start.rounded()))% → \(Int(end.rounded()))%") }
+                            if let minutes = f.durationMinutes { LabeledContent("Duration", value: FillUp.durationText(minutes: minutes)) }
+                            if let kw = f.averageChargingKW { LabeledContent("Average Speed", value: String(format: "%.1f kW", kw)) }
+                            if let fee = f.sessionFee, fee > 0 { LabeledContent("Session Fee", value: fee.formatted(.currency(code: event.vehicle?.currencyRaw ?? "USD"))) }
+                        }
+                    }
                     if !f.notes.isEmpty { Section("Notes") { Text(f.notes).font(.body) } }
                 case .service(let s):
                     Section("Service Details") { LabeledContent("Type", value: s.type.rawValue) }
