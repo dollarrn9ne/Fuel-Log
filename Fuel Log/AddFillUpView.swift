@@ -65,6 +65,15 @@ struct AddFillUpView: View {
     /// Set once the user types a price or total by hand, so the plan stops
     /// overwriting it; "Use plan rate" clears it.
     @State private var planPriceOverridden = false
+    /// True when the price shown is the one the log was saved with (an Edit Log
+    /// opened on a plan-priced charge), as opposed to typed by hand.
+    @State private var planPriceIsSaved = false
+    /// What the plan itself last wrote into the price and total fields, so
+    /// `onChange` can tell the plan's own writes from the user typing - without
+    /// this, applying the plan while the price field had focus counted as a
+    /// manual edit and immediately re-set the override.
+    @State private var lastPlanPrice = ""
+    @State private var lastPlanTotal = ""
     @State private var fuelGrade: FuelGrade?
     @State private var customGradeLabel: String = ""
     @State private var notes: String = ""
@@ -161,20 +170,23 @@ struct AddFillUpView: View {
         var rate = String(format: "%.5f", breakdown.blendedRate)
         while rate.contains("."), rate.hasSuffix("0") { rate.removeLast() }
         if rate.hasSuffix(".") { rate.removeLast() }
+        let total = formatNumber(breakdown.cost, isCurrency: true)
+        lastPlanPrice = rate
+        lastPlanTotal = total
         pricePerUnitStr = rate
-        totalCostStr = formatNumber(breakdown.cost, isCurrency: true)
+        totalCostStr = total
         recentEdits = [.volume, .price]
     }
 
     @ViewBuilder private var ratePlanRows: some View {
         if chargerType == .home {
-            Picker("Rate Plan", selection: Binding(get: { selectedRatePlanID }, set: { selectedRatePlanID = $0; planPriceOverridden = false })) {
+            Picker("Rate Plan", selection: Binding(get: { selectedRatePlanID }, set: { selectedRatePlanID = $0; planPriceOverridden = false; planPriceIsSaved = false })) {
                 Text("None").tag(nil as UUID?)
                 ForEach(ratePlans) { plan in Text(plan.name).tag(plan.id as UUID?) }
             }
             NavigationLink("Manage Rate Plans") { RatePlansView() }
             if let plan = selectedRatePlan {
-                if plan.kind == .timeOfUse, let breakdown = planBreakdown {
+                if plan.kind == .timeOfUse, !planPriceOverridden, let breakdown = planBreakdown {
                     LabeledContent("Off-Peak", value: String(format: "%.1f kWh × %@", breakdown.offPeakKWh, RatePlan.priceText(plan.offPeakRate)))
                     LabeledContent("Peak", value: String(format: "%.1f kWh × %@", breakdown.peakKWh, RatePlan.priceText(plan.peakRate)))
                     if durationMinutesValue == nil {
@@ -183,8 +195,15 @@ struct AddFillUpView: View {
                     }
                 }
                 if planPriceOverridden {
-                    Button("Use plan rate") { planPriceOverridden = false; applyRatePlan() }
-                        .buttonStyle(.borderless)
+                    Text(planPriceIsSaved ? "Showing the price this charge was saved with." : "Price set by hand - the plan isn't applied.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                    Button(planPriceIsSaved ? "Re-price from plan" : "Use plan rate") {
+                        focusedField = nil
+                        planPriceOverridden = false
+                        planPriceIsSaved = false
+                        applyRatePlan()
+                    }
+                    .buttonStyle(.borderless)
                 }
             }
         }
@@ -392,11 +411,11 @@ struct AddFillUpView: View {
                 
                 FormTextField(title: "Price / \(currentUnit.rawValue)", placeholder: "0.00", text: $pricePerUnitStr, keyboardType: .decimalPad)
                     .focused($focusedField, equals: .price)
-                    .onChange(of: pricePerUnitStr) { _, _ in if focusedField == .price { fieldEdited(.price); if selectedRatePlan != nil { planPriceOverridden = true } } }
+                    .onChange(of: pricePerUnitStr) { _, _ in if focusedField == .price { fieldEdited(.price); if selectedRatePlan != nil, pricePerUnitStr != lastPlanPrice { planPriceOverridden = true; planPriceIsSaved = false } } }
                 
                 FormTextField(title: "Total Cost (\(currentCurrency.rawValue))", placeholder: "0.00", text: $totalCostStr, keyboardType: .decimalPad)
                     .focused($focusedField, equals: .totalCost)
-                    .onChange(of: totalCostStr) { _, _ in if focusedField == .totalCost { fieldEdited(.totalCost); if selectedRatePlan != nil { planPriceOverridden = true } } }
+                    .onChange(of: totalCostStr) { _, _ in if focusedField == .totalCost { fieldEdited(.totalCost); if selectedRatePlan != nil, totalCostStr != lastPlanTotal { planPriceOverridden = true; planPriceIsSaved = false } } }
                 
                 if !isChargeMode {
                     let grades = vehicle.fuelType.availableGrades
@@ -523,6 +542,7 @@ struct AddFillUpView: View {
                 if let name = f.ratePlanName, let plan = ratePlans.first(where: { $0.name == name }) {
                     selectedRatePlanID = plan.id
                     planPriceOverridden = true
+                    planPriceIsSaved = true
                 }
                 fuelGrade = f.fuelGrade
                 customGradeLabel = f.customGradeLabel ?? ""
