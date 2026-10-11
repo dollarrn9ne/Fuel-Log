@@ -98,6 +98,9 @@ class CSVImporter: ObservableObject {
             energyKinds[row[0]] = kinds
         }
 
+        // Vehicles with AdBlue / DEF top-up rows have the system, so a new one is a diesel that uses it.
+        let adBlueVehicles = Set(rows.dropFirst().filter { $0.count >= 8 && $0[1] == "Service" && $0[5] == ServiceType.adBlue.rawValue }.map { $0[0] })
+
         for (index, row) in rows.dropFirst().enumerated() {
             if index % 20 == 0 { importProgress = Double(index) / totalRows; try? await Task.sleep(nanoseconds: 10_000_000) }
             guard row.count >= 8 else { continue }
@@ -114,6 +117,9 @@ class CSVImporter: ObservableObject {
                     vehicle = Vehicle(name: vehicleName, fuelType: .electric, fuelUnit: .kwh, efficiencyUnit: .miPerKWh)
                 } else if kinds.kWh > 0 {
                     vehicle = Vehicle(name: vehicleName, fuelType: .plugInHybrid)
+                } else if adBlueVehicles.contains(vehicleName) {
+                    vehicle = Vehicle(name: vehicleName, fuelType: .diesel)
+                    vehicle.usesAdBlue = true
                 } else {
                     vehicle = Vehicle(name: vehicleName)
                 }
@@ -151,7 +157,8 @@ class CSVImporter: ObservableObject {
             } else if recordType == "Service" {
                 let type = ServiceType(rawValue: detailsStr) ?? .general
                 if !(vehicle.services ?? []).contains(where: { abs($0.date.timeIntervalSince(date)) < 60 && $0.type == type }) {
-                    modelContext.insert(ServiceRecord(date: date, odometer: odo ?? 0, type: type, cost: cost, notes: notesStr, vehicle: vehicle, location: loc))
+                    let fluidVolume = row.count > 16 ? Double(row[16]) : nil
+                    modelContext.insert(ServiceRecord(date: date, odometer: odo ?? 0, type: type, cost: cost, notes: notesStr, vehicle: vehicle, location: loc, volume: fluidVolume))
                 }
             }
         }
