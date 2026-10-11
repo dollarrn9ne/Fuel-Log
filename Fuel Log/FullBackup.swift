@@ -52,6 +52,9 @@ struct BackupVehicle: Codable {
     var customGradeLabel: String?
     var tankCapacity: Double?
     var batteryCapacity: Double?
+    /// Optional so backups written before AdBlue / DEF tracking still decode.
+    var usesAdBlue: Bool?
+    var adBlueCapacity: Double?
     var maintenanceInterval: Double
     var maintenanceIntervalMonths: Double
     var purchaseDate: Date?
@@ -97,6 +100,7 @@ struct BackupService: Codable {
     var notes: String
     var locationID: UUID?
     var receiptData: Data?
+    var volume: Double?
 }
 
 struct BackupGasLocation: Codable {
@@ -176,6 +180,7 @@ enum FullBackup {
                     efficiencyUnitRaw: v.efficiencyUnitRaw, currencyRaw: v.currencyRaw,
                     defaultGradeRaw: v.defaultGradeRaw, customGradeLabel: v.customGradeLabel,
                     tankCapacity: v.tankCapacity, batteryCapacity: v.batteryCapacity,
+                    usesAdBlue: v.usesAdBlue, adBlueCapacity: v.adBlueCapacity,
                     maintenanceInterval: v.maintenanceInterval, maintenanceIntervalMonths: v.maintenanceIntervalMonths,
                     purchaseDate: v.purchaseDate, purchasePrice: v.purchasePrice, currentValue: v.currentValue,
                     isArchived: v.isArchived,
@@ -190,7 +195,7 @@ enum FullBackup {
                     },
                     services: (v.services ?? []).sorted { $0.date < $1.date }.map { s in
                         BackupService(id: s.id, date: s.date, odometer: s.odometer, typeRaw: s.typeRaw, cost: s.cost,
-                                      notes: s.notes, locationID: s.location?.id, receiptData: s.receiptData)
+                                      notes: s.notes, locationID: s.location?.id, receiptData: s.receiptData, volume: s.volume)
                     },
                     trips: (v.trips ?? []).sorted { $0.startDate < $1.startDate }.map { t in
                         BackupTrip(id: t.id, name: t.name, startDate: t.startDate, endDate: t.endDate,
@@ -320,6 +325,8 @@ enum FullBackup {
             object.purchasePrice = vehicle.purchasePrice
             object.currentValue = vehicle.currentValue
             object.isArchived = vehicle.isArchived
+            object.usesAdBlue = vehicle.usesAdBlue ?? false
+            object.adBlueCapacity = vehicle.adBlueCapacity
             context.insert(object)
 
             for fillUp in vehicle.fillUps {
@@ -343,7 +350,7 @@ enum FullBackup {
                     id: service.id, date: service.date, odometer: service.odometer,
                     type: ServiceType(rawValue: service.typeRaw) ?? .general, cost: service.cost,
                     notes: service.notes, vehicle: object, location: service.locationID.flatMap { gasLocations[$0] },
-                    receiptData: service.receiptData
+                    receiptData: service.receiptData, volume: service.volume
                 ))
             }
             for trip in vehicle.trips {

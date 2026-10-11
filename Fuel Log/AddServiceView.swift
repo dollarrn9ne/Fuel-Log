@@ -26,6 +26,8 @@ struct AddServiceView: View {
     @State private var odometerStr: String = ""
     @State private var type: ServiceType = .general
     @State private var costStr: String = ""
+    /// Litres/gallons of AdBlue / DEF added (AdBlue top-ups only).
+    @State private var volumeStr: String = ""
     @State private var notes: String = ""
     
     // Receipt Scanning
@@ -61,6 +63,17 @@ struct AddServiceView: View {
         }
         
         return Array(suggestions.prefix(15))
+    }
+
+    /// AdBlue / DEF is only offered for a vehicle that has the switch on (or when
+    /// editing a log that already is one, so it never silently changes type).
+    private var offeredTypes: [ServiceType] {
+        ServiceType.allCases.filter { $0 != .adBlue || vehicle.usesAdBlue || type == .adBlue }
+    }
+
+    private var volumeValue: Double? {
+        guard let value = Double(volumeStr.replacingOccurrences(of: ",", with: ".")), value > 0 else { return nil }
+        return value
     }
 
     var body: some View {
@@ -161,13 +174,16 @@ struct AddServiceView: View {
                 }
                 
                 FormTextField(title: "Odometer (\(vehicle.odometerUnit.rawValue))", placeholder: "0.0", text: $odometerStr, keyboardType: .decimalPad)
-                Picker("Service Type", selection: $type) { ForEach(ServiceType.allCases) { t in Text(t.rawValue).tag(t) } }
+                Picker("Service Type", selection: $type) { ForEach(offeredTypes) { t in Text(t.displayName).tag(t) } }
+                if type == .adBlue {
+                    FormTextField(title: "\(AdBlueNaming.name) Added (\(vehicle.fluidUnitLabel))", placeholder: vehicle.fuelUnit == .gallons ? "e.g., 2.5" : "e.g., 10", text: $volumeStr, keyboardType: .decimalPad)
+                }
                 FormTextField(title: "Total Cost", placeholder: "0.00", text: $costStr, keyboardType: .decimalPad)
             }
             Section("Notes & Description") { TextEditor(text: $notes).frame(minHeight: 80) }
         }
         .navigationTitle(editingService == nil ? "Log Service" : "Edit Service").navigationBarTitleDisplayMode(.inline)
-        .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }; ToolbarItem(placement: .confirmationAction) { Button("Save") { saveService() }.disabled(odometerStr.isEmpty || costStr.isEmpty) } }
+        .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }; ToolbarItem(placement: .confirmationAction) { Button("Save") { saveService() }.disabled(odometerStr.isEmpty || costStr.isEmpty || (type == .adBlue && volumeValue == nil)) } }
         .sheet(isPresented: $showingMapPicker) { NavigationStack { LocationPickerView(latitude: $latitude, longitude: $longitude, locationName: $locationName) } }
         .fullScreenCover(isPresented: $isScanningReceipt) {
             DocumentScanner(scannedImage: $scannedImage)
@@ -199,6 +215,7 @@ struct AddServiceView: View {
         .onAppear {
             if let s = editingService { 
                 date = s.date; locationName = s.location?.name ?? ""; latitude = s.location?.latitude ?? 0; longitude = s.location?.longitude ?? 0; odometerStr = s.odometer.odometerString; type = s.type; costStr = "\(s.cost)"; notes = s.notes
+                if let v = s.volume { volumeStr = "\(v)" }
                 if let rData = s.receiptData { scannedImage = UIImage(data: rData) }
             } else if let lastOdo = vehicle.lastOdometer { 
                 odometerStr = lastOdo.odometerString 
@@ -229,12 +246,13 @@ struct AddServiceView: View {
         
         if let s = editingService {
             s.date = date; s.odometer = odo; s.type = type; s.cost = cost; s.notes = notes; s.receiptData = finalReceiptData
+            s.volume = type == .adBlue ? volumeValue : nil
             // Re-point rather than rename: GasLocation is shared, so editing it
             // in place renamed every other log at the same place.
             s.location = resolveLocation(named: finalLocationName, latitude: latitude, longitude: longitude)
         } else {
             let newLoc = resolveLocation(named: finalLocationName, latitude: latitude, longitude: longitude)
-            let newService = ServiceRecord(date: date, odometer: odo, type: type, cost: cost, notes: notes, vehicle: vehicle, location: newLoc, receiptData: finalReceiptData)
+            let newService = ServiceRecord(date: date, odometer: odo, type: type, cost: cost, notes: notes, vehicle: vehicle, location: newLoc, receiptData: finalReceiptData, volume: type == .adBlue ? volumeValue : nil)
             modelContext.insert(newService)
             if vehicle.services == nil { vehicle.services = [] }
             vehicle.services?.append(newService)
