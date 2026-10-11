@@ -170,6 +170,7 @@ struct VehicleChartsView: View {
                                         heroEfficiencyCard
                                         statsTileGrid(columns: 3)
                                         gradeComparisonCard
+                                        chargingInsightsCard
                                     }
                                     .padding(.horizontal)
                                 } else {
@@ -182,6 +183,7 @@ struct VehicleChartsView: View {
                                             heroEfficiencyCard
                                             statsTileGrid(columns: 2)
                                             gradeComparisonCard
+                                            chargingInsightsCard
                                         }
                                         .frame(width: 380)
                                     }
@@ -193,6 +195,7 @@ struct VehicleChartsView: View {
                                     heroEfficiencyCard
                                     statsTileGrid(columns: 2)
                                     gradeComparisonCard
+                                    chargingInsightsCard
                                 }
                                 .padding(.horizontal)
                             }
@@ -434,6 +437,113 @@ struct VehicleChartsView: View {
     ///
     /// Cost per distance is the figure that actually settles whether a cheaper
     /// but less efficient fuel is worth it.
+    // MARK: Charging insights
+
+    private func chargerColor(_ type: ChargerType?) -> Color {
+        switch type {
+        case .home: return .green
+        case .publicLevel2: return .blue
+        case .dcFast: return .orange
+        case nil: return .gray
+        }
+    }
+
+    private func perKWh(_ value: Double) -> String {
+        value.formatted(.currency(code: vehicle.currencyRaw)) + "/kWh"
+    }
+
+    /// Energy, cost and speed for the charging sessions in the chosen timeframe:
+    /// headline tiles, a by-charger-type breakdown, home versus public, and each
+    /// session's average speed over time. Shown only when there are charges, so a
+    /// gas car never sees it and a plug-in hybrid sees it beside its fuel stats.
+    @ViewBuilder private var chargingInsightsCard: some View {
+        let insights = ChargingInsights(fillUps: filteredFills)
+        if insights.sessions > 0 {
+            VStack(alignment: .leading, spacing: 14) {
+                Text("CHARGING")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.secondary)
+
+                LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
+                    StatTile(icon: "bolt.fill", tint: .yellow,
+                             value: "\(Int(insights.totalKWh.rounded()).formatted()) kWh",
+                             label: insights.sessions == 1 ? "1 Session" : "\(insights.sessions) Sessions")
+                    if let cost = insights.avgCostPerKWh {
+                        StatTile(icon: "tag.fill", tint: .orange, value: perKWh(cost), label: "Avg Cost (fees incl.)")
+                    }
+                    if let kw = insights.avgKW {
+                        StatTile(icon: "speedometer", tint: .blue, value: String(format: "%.1f kW", kw), label: "Avg Charging Speed")
+                    }
+                    if let kw = insights.fastestKW {
+                        StatTile(icon: "bolt.horizontal.fill", tint: .red, value: String(format: "%.1f kW", kw), label: "Fastest Session")
+                    }
+                }
+
+                if insights.byType.contains(where: { $0.type != nil }) {
+                    Divider()
+                    Text("BY CHARGER TYPE")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(.secondary)
+                    ForEach(insights.byType) { entry in
+                        HStack(alignment: .top, spacing: 10) {
+                            Image(systemName: entry.type?.systemImage ?? "questionmark.circle")
+                                .foregroundStyle(chargerColor(entry.type))
+                                .frame(width: 24)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(entry.title).font(.subheadline.weight(.bold))
+                                Text("\(entry.sessions) \(entry.sessions == 1 ? "session" : "sessions") • \(Int(entry.kWh.rounded()).formatted()) kWh")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            VStack(alignment: .trailing, spacing: 2) {
+                                if let cost = entry.avgCostPerKWh { Text(perKWh(cost)).font(.subheadline.weight(.medium)).monospacedDigit() }
+                                if let kw = entry.avgKW { Text(String(format: "%.1f kW avg", kw)).font(.caption).foregroundStyle(.secondary).monospacedDigit() }
+                            }
+                        }
+                    }
+                }
+
+                if let energyShare = insights.homeEnergyShare {
+                    Divider()
+                    Text("HOME VS PUBLIC")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(.secondary)
+                    GeometryReader { geo in
+                        ZStack(alignment: .leading) {
+                            Capsule().fill(Color.blue.opacity(0.35))
+                            Capsule().fill(Color.green).frame(width: geo.size.width * energyShare)
+                        }
+                    }
+                    .frame(height: 10)
+                    Text("Home is \(Int((energyShare * 100).rounded()))% of the energy" + (insights.homeCostShare.map { " and \(Int(($0 * 100).rounded()))% of the spend" } ?? "") + ".")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                if insights.speedPoints.count > 1 {
+                    Divider()
+                    Text("AVERAGE SPEED PER SESSION (kW)")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(.secondary)
+                    Chart(insights.speedPoints) { point in
+                        PointMark(x: .value("Date", point.date), y: .value("kW", point.kW))
+                            .foregroundStyle(by: .value("Charger", point.type?.rawValue ?? "Not Recorded"))
+                    }
+                    .chartForegroundStyleScale([
+                        ChargerType.home.rawValue: Color.green,
+                        ChargerType.publicLevel2.rawValue: Color.blue,
+                        ChargerType.dcFast.rawValue: Color.orange,
+                        "Not Recorded": Color.gray
+                    ])
+                    .chartLegend(position: .bottom)
+                    .frame(height: 150)
+                }
+            }
+            .padding()
+            .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
+        }
+    }
+
     @ViewBuilder private var gradeComparisonCard: some View {
         let comparison = vehicle.efficiencyByGrade
         if comparison.count > 1 {

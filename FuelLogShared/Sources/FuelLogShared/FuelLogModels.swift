@@ -422,6 +422,90 @@ public enum EfficiencyConverter {
     @Transient public var totalCost: Double { volume * pricePerUnit + (sessionFee ?? 0) }
 }
 
+// MARK: - Charging insights
+
+/// Summary figures over a set of EV charging sessions: how much energy, what it
+/// cost per kWh (session fees included), how fast it charged, and how home
+/// charging compares with public. Pure over the fill-ups it's given, so a
+/// timeframe filter just passes fewer of them.
+public struct ChargingInsights {
+    /// One row of the by-charger-type breakdown. `type` is nil for sessions that
+    /// didn't record one.
+    public struct TypeSummary: Identifiable {
+        public let type: ChargerType?
+        public let sessions: Int
+        public let kWh: Double
+        public let cost: Double
+        /// Energy-weighted average over sessions that recorded a duration.
+        public let avgKW: Double?
+        public var id: String { type?.rawValue ?? "Not Recorded" }
+        public var title: String { type?.rawValue ?? "Not Recorded" }
+        public var avgCostPerKWh: Double? { kWh > 0 ? cost / kWh : nil }
+    }
+
+    public struct SpeedPoint: Identifiable {
+        public let id: UUID
+        public let date: Date
+        public let kW: Double
+        public let type: ChargerType?
+    }
+
+    public let sessions: Int
+    public let totalKWh: Double
+    public let totalCost: Double
+    /// Total energy divided by total time, over sessions that recorded a duration -
+    /// so one long slow overnight charge isn't averaged equally with a short fast one.
+    public let avgKW: Double?
+    public let fastestKW: Double?
+    public let byType: [TypeSummary]
+    public let speedPoints: [SpeedPoint]
+    /// Home's share of the energy / spend among sessions whose charger type is
+    /// known; nil unless both home and public charging are present.
+    public let homeEnergyShare: Double?
+    public let homeCostShare: Double?
+
+    public var avgCostPerKWh: Double? { totalKWh > 0 ? totalCost / totalKWh : nil }
+
+    public init(fillUps: [FillUp]) {
+        let charges = fillUps.filter { $0.unit == .kwh && $0.volume > 0 }
+        sessions = charges.count
+        totalKWh = charges.map(\.volume).reduce(0, +)
+        totalCost = charges.map(\.totalCost).reduce(0, +)
+
+        func averageKW(_ list: [FillUp]) -> Double? {
+            let timed = list.filter { ($0.durationMinutes ?? 0) > 0 }
+            let hours = timed.map { Double($0.durationMinutes ?? 0) / 60.0 }.reduce(0, +)
+            guard hours > 0 else { return nil }
+            return timed.map(\.volume).reduce(0, +) / hours
+        }
+        avgKW = averageKW(charges)
+        fastestKW = charges.compactMap(\.averageChargingKW).max()
+
+        let order: [ChargerType?] = [.home, .publicLevel2, .dcFast, nil]
+        byType = order.compactMap { type in
+            let group = charges.filter { $0.chargerType == type }
+            guard !group.isEmpty else { return nil }
+            return TypeSummary(type: type, sessions: group.count, kWh: group.map(\.volume).reduce(0, +), cost: group.map(\.totalCost).reduce(0, +), avgKW: averageKW(group))
+        }
+
+        speedPoints = charges
+            .sorted { $0.date < $1.date }
+            .compactMap { fill in fill.averageChargingKW.map { SpeedPoint(id: fill.id, date: fill.date, kW: $0, type: fill.chargerType) } }
+
+        let home = byType.first { $0.type == .home }
+        let publicTypes = byType.filter { $0.type == .publicLevel2 || $0.type == .dcFast }
+        if let home, !publicTypes.isEmpty {
+            let publicKWh = publicTypes.map(\.kWh).reduce(0, +)
+            let publicCost = publicTypes.map(\.cost).reduce(0, +)
+            homeEnergyShare = (home.kWh + publicKWh) > 0 ? home.kWh / (home.kWh + publicKWh) : nil
+            homeCostShare = (home.cost + publicCost) > 0 ? home.cost / (home.cost + publicCost) : nil
+        } else {
+            homeEnergyShare = nil
+            homeCostShare = nil
+        }
+    }
+}
+
 // MARK: - ServiceRecord
 
 @Model public final class ServiceRecord {
