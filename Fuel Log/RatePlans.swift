@@ -1,4 +1,6 @@
 import SwiftUI
+import SwiftData
+import FuelLogShared
 
 // MARK: - Rate plan
 
@@ -40,12 +42,64 @@ struct RatePlan: Codable, Identifiable, Equatable {
     var seasonStartMonth: Int?
     var seasonEndMonth: Int?
 
+    /// One step of a tiered plan: energy up to `upToKWh` this month costs `rate`.
+    /// The last tier has no limit and covers everything above.
+    struct Tier: Codable, Equatable, Identifiable {
+        var id = UUID()
+        var upToKWh: Double?
+        var rate: Double
+    }
+
+    /// A tiered plan (price rises with the month's household use) is stored as a
+    /// fixed plan with tiers, not a new `Kind`: a build that doesn't know a new
+    /// kind fails to decode the whole plan list, and would then overwrite iCloud
+    /// with an empty one. `fixedRate` holds the first tier's price so an older
+    /// build still prices a tiered plan sensibly. Optional for the same reason
+    /// as the season fields.
+    var tiers: [Tier]?
+    /// What the rest of the household uses in a month before any EV charging,
+    /// since the app can't see the meter. Counts toward which tier a charge is in.
+    var tierBaselineKWh: Double?
+    /// Vehicles (by id string) this plan is the default for, so a charge on one
+    /// of them picks it without asking. Kept on the plan, not on `Vehicle`, so
+    /// it syncs with the plan and needs no new synced field.
+    var defaultVehicleIDs: [String]?
+
+    var isTiered: Bool { kind == .fixed && !(tiers ?? []).isEmpty }
+
+    func isDefault(for vehicleID: UUID) -> Bool {
+        (defaultVehicleIDs ?? []).contains(vehicleID.uuidString)
+    }
+
     /// The result of pricing one session against a plan.
     struct Breakdown: Equatable {
         var offPeakKWh: Double
         var peakKWh: Double
         var cost: Double
         var blendedRate: Double
+        /// For a tiered plan, how the session's kWh fell across the tiers.
+        var tierSlices: [TierSlice] = []
+    }
+
+    struct TierSlice: Equatable {
+        var kWh: Double
+        var rate: Double
+    }
+
+    /// Splits `kWh` across the tiers, given how much the household had already
+    /// used this month. Only the part of the session above each tier's start
+    /// and below its limit lands in it.
+    func tierSlices(kWh: Double, usedBefore: Double) -> [TierSlice] {
+        let used = max(0, usedBefore)
+        var lower = 0.0
+        var slices: [TierSlice] = []
+        for tier in tiers ?? [] {
+            let upper = tier.upToKWh ?? .infinity
+            let inTier = max(0, min(used + kWh, upper) - max(used, lower))
+            slices.append(TierSlice(kWh: inTier, rate: tier.rate))
+            lower = upper
+        }
+        return slices
     }
 
     var hasSeason: Bool { seasonStartMonth != nil && seasonEndMonth != nil }
@@ -67,10 +121,17 @@ struct RatePlan: Codable, Identifiable, Equatable {
     }
 
     /// The plan a charge on `date` should use without being asked, or nil when
-    /// there isn't a single clear one. A plan for the current season beats a
-    /// year-round one; two equally good candidates are left for the user to pick.
-    static func bestMatch(in plans: [RatePlan], on date: Date, calendar: Calendar = .current) -> RatePlan? {
-        let active = plans.filter { $0.isActive(on: date, calendar: calendar) }
+    /// there isn't a single clear one. The vehicle's own default plan comes
+    /// first, then a plan for the current season beats a year-round one; two
+    /// equally good candidates are left for the user to pick.
+    static func bestMatch(in plans: [RatePlan], on date: Date, vehicleID: UUID? = nil, calendar: Calendar = .current) -> RatePlan? {
+        var active = plans.filter { $0.isActive(on: date, calendar: calendar) }
+        // Plans marked as this vehicle's default come first; if none apply on
+        // this date (say, a winter-only default in July) fall back to the rest.
+        if let vehicleID {
+            let defaults = active.filter { $0.isDefault(for: vehicleID) }
+            if !defaults.isEmpty { active = defaults }
+        }
         let seasonal = active.filter(\.hasSeason)
         let pool = seasonal.isEmpty ? active : seasonal
         return pool.count == 1 ? pool[0] : nil
@@ -94,9 +155,13 @@ struct RatePlan: Codable, Identifiable, Equatable {
     /// the session, so the off-peak share of the kWh equals the off-peak share
     /// of the minutes. Without a duration the whole session is judged by the
     /// moment it started.
-    func breakdown(kWh: Double, start: Date, minutes: Int?, calendar: Calendar = .current) -> Breakdown {
+    func breakdown(kWh: Double, start: Date, minutes: Int?, householdKWhBefore: Double = 0, calendar: Calendar = .current) -> Breakdown {
         guard kWh > 0 else { return Breakdown(offPeakKWh: 0, peakKWh: 0, cost: 0, blendedRate: 0) }
         switch kind {
+        case .fixed where isTiered:
+            let slices = tierSlices(kWh: kWh, usedBefore: householdKWhBefore)
+            let cost = slices.reduce(0) { $0 + $1.kWh * $1.rate }
+            return Breakdown(offPeakKWh: 0, peakKWh: kWh, cost: cost, blendedRate: cost / kWh, tierSlices: slices)
         case .fixed:
             return Breakdown(offPeakKWh: 0, peakKWh: kWh, cost: kWh * fixedRate, blendedRate: fixedRate)
         case .timeOfUse:
@@ -120,11 +185,30 @@ struct RatePlan: Codable, Identifiable, Equatable {
     /// One-line description for lists and pickers.
     var summary: String {
         switch kind {
+        case .fixed where isTiered:
+            let rates = (tiers ?? []).map(\.rate)
+            return "Tiered \(RatePlan.priceText(rates.min() ?? 0)) – \(RatePlan.priceText(rates.max() ?? 0))/kWh"
         case .fixed:
             return "Fixed \(RatePlan.priceText(fixedRate))/kWh"
         case .timeOfUse:
             return "Off-peak \(RatePlan.priceText(offPeakRate)) • Peak \(RatePlan.priceText(peakRate))/kWh"
         }
+    }
+
+    /// "First 300 kWh 0.12 • next 500 kWh 0.18 • above 0.30" for a tiered plan.
+    var tierDescription: String {
+        var lower = 0.0
+        var parts: [String] = []
+        for tier in tiers ?? [] {
+            if let limit = tier.upToKWh {
+                let size = limit - lower
+                parts.append("\(parts.isEmpty ? "first" : "next") \(Int(size.rounded())) kWh \(RatePlan.priceText(tier.rate))")
+                lower = limit
+            } else {
+                parts.append("above \(RatePlan.priceText(tier.rate))")
+            }
+        }
+        return parts.joined(separator: " • ")
     }
 
     static func priceText(_ value: Double) -> String {
@@ -307,7 +391,7 @@ enum RatePlanStore {
 extension RatePlan {
     /// Two plans with the same signature price every session identically.
     var contentSignature: String {
-        "\(name.lowercased())|\(kind.rawValue)|\(fixedRate)|\(peakRate)|\(offPeakRate)|\(offPeakStartMinute)|\(offPeakEndMinute)|\(weekendsAllOffPeak)|\(seasonStartMonth ?? 0)|\(seasonEndMonth ?? 0)"
+        "\(name.lowercased())|\(kind.rawValue)|\(fixedRate)|\(peakRate)|\(offPeakRate)|\(offPeakStartMinute)|\(offPeakEndMinute)|\(weekendsAllOffPeak)|\(seasonStartMonth ?? 0)|\(seasonEndMonth ?? 0)|\((tiers ?? []).map { "\($0.upToKWh ?? -1):\($0.rate)" }.joined(separator: ","))|\(tierBaselineKWh ?? 0)"
     }
 }
 
@@ -333,6 +417,11 @@ struct RatePlansView: View {
                         VStack(alignment: .leading, spacing: 4) {
                             Text(plan.name).font(.headline).foregroundStyle(.primary)
                             Text(plan.summary).font(.subheadline).foregroundStyle(.secondary)
+                            if plan.isTiered {
+                                Text(plan.tierDescription)
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                            }
                             if let season = plan.seasonText {
                                 Text("Applies \(season)")
                                     .font(.footnote)
@@ -378,9 +467,33 @@ private struct RatePlanEditor: View {
     @State private var fixedText: String
     @State private var peakText: String
     @State private var offPeakText: String
+    @State private var style: Style
+    @State private var tierRows: [TierRow]
+    @State private var baselineText: String
+    @Query(sort: \Vehicle.name) private var vehicles: [Vehicle]
     let onSave: (RatePlan) -> Void
 
+    /// How the plan charges. Tiered is a fixed plan with tiers underneath (see
+    /// `RatePlan.tiers`), so this is an editing choice, not a stored kind.
+    private enum Style: String, CaseIterable, Identifiable {
+        case fixed = "Fixed"
+        case timeOfUse = "Time of Use"
+        case tiered = "Tiered"
+        var id: String { rawValue }
+    }
+
+    private struct TierRow: Identifiable {
+        var id = UUID()
+        var limit: String
+        var rate: String
+    }
+
     init(plan: RatePlan, onSave: @escaping (RatePlan) -> Void) {
+        _style = State(initialValue: plan.isTiered ? .tiered : (plan.kind == .timeOfUse ? .timeOfUse : .fixed))
+        _tierRows = State(initialValue: (plan.tiers ?? []).isEmpty
+            ? [TierRow(limit: "", rate: "")]
+            : (plan.tiers ?? []).map { TierRow(limit: $0.upToKWh.map { String($0) } ?? "", rate: String($0.rate)) })
+        _baselineText = State(initialValue: (plan.tierBaselineKWh ?? 0) > 0 ? String(plan.tierBaselineKWh ?? 0) : "")
         _draft = State(initialValue: plan)
         _fixedText = State(initialValue: plan.fixedRate > 0 ? String(plan.fixedRate) : "")
         _peakText = State(initialValue: plan.peakRate > 0 ? String(plan.peakRate) : "")
@@ -401,10 +514,37 @@ private struct RatePlanEditor: View {
         return (parts.hour ?? 0) * 60 + (parts.minute ?? 0)
     }
 
+    /// Every tier needs a price; every tier but the last needs a limit, and the
+    /// limits must climb.
+    private var tiersValid: Bool {
+        guard !tierRows.isEmpty else { return false }
+        var previous = 0.0
+        for (index, row) in tierRows.enumerated() {
+            guard number(row.rate) > 0 else { return false }
+            if index < tierRows.count - 1 {
+                let limit = number(row.limit)
+                guard limit > previous else { return false }
+                previous = limit
+            }
+        }
+        return true
+    }
+
+    private var builtTiers: [RatePlan.Tier] {
+        tierRows.enumerated().map { index, row in
+            RatePlan.Tier(upToKWh: index == tierRows.count - 1 ? nil : number(row.limit), rate: number(row.rate))
+        }
+    }
+
+    /// Electric and plug-in hybrid vehicles that could be given a default plan.
+    private var chargeableVehicles: [Vehicle] {
+        vehicles.filter { !$0.isArchived && ($0.fuelType == .electric || $0.fuelType == .plugInHybrid) }
+    }
+
     private var canSave: Bool {
         guard !draft.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
         switch draft.kind {
-        case .fixed: return number(fixedText) > 0
+        case .fixed: return style == .tiered ? tiersValid : number(fixedText) > 0
         case .timeOfUse: return number(peakText) > 0 || number(offPeakText) > 0
         }
     }
@@ -413,13 +553,52 @@ private struct RatePlanEditor: View {
         Form {
             Section {
                 TextField("Name", text: $draft.name)
-                Picker("Type", selection: $draft.kind) {
-                    ForEach(RatePlan.Kind.allCases) { Text($0.rawValue).tag($0) }
+                Picker("Type", selection: $style) {
+                    ForEach(Style.allCases) { Text($0.rawValue).tag($0) }
                 }
                 .pickerStyle(.segmented)
+                .onChange(of: style) { _, newStyle in
+                    draft.kind = newStyle == .timeOfUse ? .timeOfUse : .fixed
+                }
             }
 
             switch draft.kind {
+            case .fixed where style == .tiered:
+                Section {
+                    ForEach($tierRows) { $row in
+                        HStack {
+                            if row.id == tierRows.last?.id {
+                                Text(tierRows.count == 1 ? "All usage" : "Above")
+                                Spacer()
+                            } else {
+                                Text("Up to")
+                                TextField("kWh", text: $row.limit)
+                                    .keyboardType(.decimalPad)
+                                    .multilineTextAlignment(.trailing)
+                                Text("kWh")
+                            }
+                            Text("@").foregroundStyle(.secondary)
+                            TextField("0.00", text: $row.rate)
+                                .keyboardType(.decimalPad)
+                                .multilineTextAlignment(.trailing)
+                                .frame(maxWidth: 70)
+                        }
+                    }
+                    .onDelete { offsets in
+                        guard tierRows.count > offsets.count else { return }
+                        tierRows.remove(atOffsets: offsets)
+                    }
+                    Button("Add Tier") { tierRows.append(TierRow(limit: "", rate: "")) }
+                } header: {
+                    Text("Tiers (per month)")
+                } footer: {
+                    Text("The price per kWh rises as the household's monthly use passes each limit. The last tier covers everything above. Swipe a tier to remove it.")
+                }
+                Section {
+                    FormTextField(title: "Other household use (kWh/month)", placeholder: "e.g., 600", text: $baselineText, keyboardType: .decimalPad)
+                } footer: {
+                    Text("What the home uses each month apart from charging. A charge is priced by where the month's total lands: this plus home charges already logged that calendar month.")
+                }
             case .fixed:
                 Section("Price") {
                     FormTextField(title: "Price per kWh", placeholder: "e.g., 0.16", text: $fixedText, keyboardType: .decimalPad)
@@ -437,6 +616,25 @@ private struct RatePlanEditor: View {
                     Text("Off-Peak Hours")
                 } footer: {
                     Text("Any other time is billed at the peak price. A window can run past midnight, such as 9:00 PM to 6:00 AM.")
+                }
+            }
+
+            if !chargeableVehicles.isEmpty {
+                Section {
+                    ForEach(chargeableVehicles) { vehicle in
+                        Toggle(vehicle.name, isOn: Binding(
+                            get: { draft.isDefault(for: vehicle.id) },
+                            set: { on in
+                                var ids = Set(draft.defaultVehicleIDs ?? [])
+                                if on { ids.insert(vehicle.id.uuidString) } else { ids.remove(vehicle.id.uuidString) }
+                                draft.defaultVehicleIDs = ids.isEmpty ? nil : ids.sorted()
+                            }
+                        ))
+                    }
+                } header: {
+                    Text("Default For")
+                } footer: {
+                    Text("Home charges on these vehicles use this plan automatically.")
                 }
             }
 
@@ -475,6 +673,15 @@ private struct RatePlanEditor: View {
                     saved.fixedRate = number(fixedText)
                     saved.peakRate = number(peakText)
                     saved.offPeakRate = number(offPeakText)
+                    if style == .tiered {
+                        saved.tiers = builtTiers
+                        saved.tierBaselineKWh = number(baselineText) > 0 ? number(baselineText) : nil
+                        // An older build ignores tiers, so give it the first tier's price.
+                        saved.fixedRate = saved.tiers?.first?.rate ?? 0
+                    } else {
+                        saved.tiers = nil
+                        saved.tierBaselineKWh = nil
+                    }
                     onSave(saved)
                     dismiss()
                 }
