@@ -386,6 +386,19 @@ struct MainDashboardView: View {
     /// column live in relocatedIconRow instead, positioned independently
     /// of whatever width this pill has.
 
+    /// Whether the sheet also offers the middle (65%) detent. Only Duo goes
+    /// without it - its outer display is too small for a third stop, and the
+    /// inner display and Split View panes follow suit. A regular iPhone keeps
+    /// all three. Duo is told apart the way the other Duo-only layouts are: a
+    /// reserved trailing column or the rotated inner display
+    /// (`sheetIconClusterWidth`), or a window narrower than the screen (a
+    /// Split View pane).
+    private func offersMiddleDetent(_ proxy: GeometryProxy) -> Bool {
+        guard sheetIconClusterWidth(proxy) == 0 else { return false }
+        let screenWidth = (UIApplication.shared.connectedScenes.first as? UIWindowScene)?.screen.bounds.width ?? UIScreen.main.bounds.width
+        return proxy.size.width >= screenWidth - 40
+    }
+
     /// The pill's resting detent: a fixed short height on Duo's inner display
     /// in portrait (see `DuoInnerRestingPillDetent`), else 42%.
     private func restingDetent(_ proxy: GeometryProxy) -> PresentationDetent {
@@ -397,15 +410,16 @@ struct MainDashboardView: View {
     @ViewBuilder
     private func bottomSheetContent(_ proxy: GeometryProxy) -> some View {
         DashboardSheetContent(colorScheme: _colorScheme, vehicle: vehicle, allVehicles: allVehicles, events: timelineEvents, onSelectVehicle: onSelectVehicle, newReportMonth: newReportMonth, onAcknowledgeReport: onAcknowledgeReport, selectedLogTab: $selectedLogTab, sheetDetent: $sheetDetent, clusterWidth: sheetIconClusterWidth(proxy), screenHeight: fullHeight(proxy), relocatedColumnNeedsManualInset: trailingClusterWidth(proxy) == 0, hidesInlineIcons: isLeadingSplitViewPane(proxy), leadingPaneIconColumn: isLeadingSplitViewPane(proxy), showingAddFillUp: $showingAddFillUp, fillUpEntryMode: $fillUpEntryMode, showingAddService: $showingAddService, showingTrips: $showingTrips, showingSettings: $showingSettings, showingArchivedVehicles: $showingArchivedVehicles, showingAddVehicle: $showingAddVehicle, showingDeleteConfirmation: $showingDeleteConfirmation, showingCharts: $showingCharts, showingMonthlyReport: $showingMonthlyReport, monthlyReportMonth: $monthlyReportMonth, eventToEdit: $eventToEdit, vehicleToEdit: $vehicleToEdit)
-            .presentationDetents([restingDetent(proxy), .large], selection: $sheetDetent)
-            .presentationDragIndicator(.visible).presentationBackgroundInteraction(.enabled(upThrough: restingDetent(proxy))).interactiveDismissDisabled()
+            .presentationDetents(offersMiddleDetent(proxy) ? [restingDetent(proxy), Self.middleDetent, .large] : [restingDetent(proxy), .large], selection: $sheetDetent)
+            .presentationDragIndicator(.visible).presentationBackgroundInteraction(.enabled(upThrough: offersMiddleDetent(proxy) ? Self.middleDetent : restingDetent(proxy))).interactiveDismissDisabled()
             .presentationBackground { panelBackground(in: Rectangle()) }
             // Keep the selection on whichever resting detent applies now
             // (it differs between Duo's inner portrait display and
             // everything else, and can change on rotation/fold) - a
             // selection that isn't one of the offered detents is invalid.
             .onChange(of: restingDetent(proxy), initial: true) { _, resting in
-                if sheetDetent != .large { sheetDetent = resting }
+                // Stay on the middle stop when it's offered, too.
+                if sheetDetent != .large, !(sheetDetent == Self.middleDetent && offersMiddleDetent(proxy)) { sheetDetent = resting }
             }
     }
 
@@ -438,13 +452,16 @@ struct MainDashboardView: View {
     /// The tallest detent the map still pans for. Beyond this so little map is
     /// left that panning is skipped, so it doesn't constrain the zoom.
     private static let tallestPannedSheetFraction: CGFloat = 0.65
+    /// The middle stop, offered everywhere except Duo.
+    private static let middleDetent: PresentationDetent = .fraction(tallestPannedSheetFraction)
 
     /// How much of the screen the bottom sheet currently covers. `PresentationDetent`
     /// doesn't expose its fraction, so map the known detents back to their values.
-    /// Only two detents are offered now (small/large) - the middle one was
-    /// removed at the user's request.
+    /// The middle stop exists on everything but Duo - see `offersMiddleDetent`.
     private var sheetFraction: CGFloat {
-        sheetDetent == .large ? 0.92 : Self.smallestSheetFraction
+        if sheetDetent == .large { return 0.92 }
+        if sheetDetent == Self.middleDetent { return Self.tallestPannedSheetFraction }
+        return Self.smallestSheetFraction
     }
 
     /// Width the side panel needs before it earns its place: 420pt of panel plus
