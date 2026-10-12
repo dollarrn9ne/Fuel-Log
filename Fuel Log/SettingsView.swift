@@ -613,9 +613,14 @@ struct SettingsView: View {
             NavigationLink { RatePlansView() } label: {
                 Label("Home Charging Rates", systemImage: "bolt.fill")
             }
-            Text("Save your home electricity plan - a fixed price, or peak and off-peak prices - and charges logged at home are priced from it automatically.")
+            // No divider between the row and its caption: it started at the row's
+            // title while the caption starts at the card edge, so the two never
+            // lined up. The caption reads as part of the row instead.
+            .listRowSeparator(.hidden)
+            Text("Save your home electricity rate - fixed, time of use, tiered or seasonal - and charges logged at home are priced from it automatically.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+                .listRowSeparator(.hidden)
         }
     }
 

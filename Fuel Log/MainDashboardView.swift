@@ -83,6 +83,15 @@ struct MainDashboardView: View {
     /// Zoom chosen when the pins last changed, held steady while the sheet moves.
     @State private var fittedSpan: MKCoordinateSpan?
     @State private var sheetDetent: PresentationDetent = .fraction(0.42)
+    /// Sheet heights measured from the content on a regular iPhone (see
+    /// `DashboardSheetContent.onMeasureStops`): the small stop ends just below
+    /// the Fuel Logs / Service Logs control, the middle one just below the newest log row.
+    /// Both stay nil on Duo, which keeps its own stops.
+    @State private var measuredSmallHeight: CGFloat?
+    @State private var measuredMiddleHeight: CGFloat?
+    /// What the sheet adds below a `.height` stop (home-indicator area). The
+    /// measured heights are *visible* heights; a stop asks for that minus this.
+    @State private var measuredBottomInset: CGFloat = 0
     @State private var selectedLogTab: LogTabChoice = .fuel
     @StateObject private var locationManager = CurrentLocationManager()
     @State private var isMapReady = false
@@ -386,26 +395,95 @@ struct MainDashboardView: View {
     /// column live in relocatedIconRow instead, positioned independently
     /// of whatever width this pill has.
 
+    /// Whether the sheet also offers the middle (65%) detent. Only Duo goes
+    /// without it - its outer display is too small for a third stop, and the
+    /// inner display and Split View panes follow suit. A regular iPhone keeps
+    /// all three. Duo is told apart the way the other Duo-only layouts are: a
+    /// reserved trailing column or the rotated inner display
+    /// (`sheetIconClusterWidth`), or a window narrower than the screen (a
+    /// Split View pane).
+    private func offersMiddleDetent(_ proxy: GeometryProxy) -> Bool {
+        guard sheetIconClusterWidth(proxy) == 0 else { return false }
+        let screenWidth = (UIApplication.shared.connectedScenes.first as? UIWindowScene)?.screen.bounds.width ?? UIScreen.main.bounds.width
+        return proxy.size.width >= screenWidth - 40
+    }
+
     /// The pill's resting detent: a fixed short height on Duo's inner display
     /// in portrait (see `DuoInnerRestingPillDetent`), else 42%.
     private func restingDetent(_ proxy: GeometryProxy) -> PresentationDetent {
-        trailingClusterWidth(proxy) == 0 && sheetIconClusterWidth(proxy) > 0
-            ? .custom(DuoInnerRestingPillDetent.self)
-            : .fraction(0.42)
+        if trailingClusterWidth(proxy) == 0 && sheetIconClusterWidth(proxy) > 0 {
+            return .custom(DuoInnerRestingPillDetent.self)
+        }
+        if offersMiddleDetent(proxy), let measured = measuredSmallHeight {
+            return .height(max(measured - measuredBottomInset, 0))
+        }
+        return .fraction(0.42)
+    }
+
+    /// The middle stop on a regular iPhone: tall enough to show the newest log
+    /// row in full, but never so tall the map above has no room left to pan the
+    /// pins into. Nil on Duo, which goes without one.
+    private func middleDetent(_ proxy: GeometryProxy) -> PresentationDetent? {
+        guard offersMiddleDetent(proxy) else { return nil }
+        return .height(max(middleSheetHeight(fullHeight(proxy)) - measuredBottomInset, 0))
+    }
+
+    /// Largest share of the screen the middle stop may cover.
+    private static let middleStopCeiling: CGFloat = 0.8
+
+    private func middleSheetHeight(_ containerHeight: CGFloat) -> CGFloat {
+        var height = measuredMiddleHeight ?? containerHeight * Self.tallestPannedSheetFraction
+        height = min(height, containerHeight * Self.middleStopCeiling)
+        // Always clearly taller than the small stop, or the two blur together.
+        if let small = measuredSmallHeight { height = max(height, small + 80) }
+        return height
+    }
+
+    /// The small stop's height (measured on a regular iPhone).
+    private func smallSheetHeight(_ containerHeight: CGFloat) -> CGFloat {
+        measuredSmallHeight ?? containerHeight * Self.smallestSheetFraction
+    }
+
+    /// How much of the screen the sheet covers at its current stop, which is
+    /// what the map has to pan the pins clear of.
+    private func currentSheetHeight(_ containerHeight: CGFloat) -> CGFloat {
+        if sheetDetent == .large { return containerHeight * 0.92 }
+        if sheetDetent == .height(max(middleSheetHeight(containerHeight) - measuredBottomInset, 0)) { return middleSheetHeight(containerHeight) }
+        return smallSheetHeight(containerHeight)
+    }
+
+    /// The two stops, watched together so the selection can follow them when
+    /// measuring moves them (a maintenance alert appearing, a vehicle switch).
+    private struct SheetStops: Equatable {
+        var resting: PresentationDetent
+        var middle: PresentationDetent?
     }
 
     @ViewBuilder
     private func bottomSheetContent(_ proxy: GeometryProxy) -> some View {
-        DashboardSheetContent(colorScheme: _colorScheme, vehicle: vehicle, allVehicles: allVehicles, events: timelineEvents, onSelectVehicle: onSelectVehicle, newReportMonth: newReportMonth, onAcknowledgeReport: onAcknowledgeReport, selectedLogTab: $selectedLogTab, sheetDetent: $sheetDetent, clusterWidth: sheetIconClusterWidth(proxy), screenHeight: fullHeight(proxy), relocatedColumnNeedsManualInset: trailingClusterWidth(proxy) == 0, hidesInlineIcons: isLeadingSplitViewPane(proxy), leadingPaneIconColumn: isLeadingSplitViewPane(proxy), showingAddFillUp: $showingAddFillUp, fillUpEntryMode: $fillUpEntryMode, showingAddService: $showingAddService, showingTrips: $showingTrips, showingSettings: $showingSettings, showingArchivedVehicles: $showingArchivedVehicles, showingAddVehicle: $showingAddVehicle, showingDeleteConfirmation: $showingDeleteConfirmation, showingCharts: $showingCharts, showingMonthlyReport: $showingMonthlyReport, monthlyReportMonth: $monthlyReportMonth, eventToEdit: $eventToEdit, vehicleToEdit: $vehicleToEdit)
-            .presentationDetents([restingDetent(proxy), .large], selection: $sheetDetent)
-            .presentationDragIndicator(.visible).presentationBackgroundInteraction(.enabled(upThrough: restingDetent(proxy))).interactiveDismissDisabled()
+        DashboardSheetContent(colorScheme: _colorScheme, vehicle: vehicle, allVehicles: allVehicles, events: timelineEvents, onSelectVehicle: onSelectVehicle, newReportMonth: newReportMonth, onAcknowledgeReport: onAcknowledgeReport, selectedLogTab: $selectedLogTab, sheetDetent: $sheetDetent, onMeasureStops: offersMiddleDetent(proxy) ? { small, middle, inset in
+            if abs(inset - measuredBottomInset) > 0.5 { measuredBottomInset = inset }
+            if small != measuredSmallHeight, abs((small ?? -100) - (measuredSmallHeight ?? -200)) > 0.5 { measuredSmallHeight = small }
+            if middle != measuredMiddleHeight, abs((middle ?? -100) - (measuredMiddleHeight ?? -200)) > 0.5 { measuredMiddleHeight = middle }
+        } : nil, clusterWidth: sheetIconClusterWidth(proxy), screenHeight: fullHeight(proxy), relocatedColumnNeedsManualInset: trailingClusterWidth(proxy) == 0, hidesInlineIcons: isLeadingSplitViewPane(proxy), leadingPaneIconColumn: isLeadingSplitViewPane(proxy), showingAddFillUp: $showingAddFillUp, fillUpEntryMode: $fillUpEntryMode, showingAddService: $showingAddService, showingTrips: $showingTrips, showingSettings: $showingSettings, showingArchivedVehicles: $showingArchivedVehicles, showingAddVehicle: $showingAddVehicle, showingDeleteConfirmation: $showingDeleteConfirmation, showingCharts: $showingCharts, showingMonthlyReport: $showingMonthlyReport, monthlyReportMonth: $monthlyReportMonth, eventToEdit: $eventToEdit, vehicleToEdit: $vehicleToEdit)
+            .presentationDetents(middleDetent(proxy).map { [restingDetent(proxy), $0, .large] } ?? [restingDetent(proxy), .large], selection: $sheetDetent)
+            .presentationDragIndicator(.visible).presentationBackgroundInteraction(.enabled(upThrough: middleDetent(proxy) ?? restingDetent(proxy))).interactiveDismissDisabled()
             .presentationBackground { panelBackground(in: Rectangle()) }
             // Keep the selection on whichever resting detent applies now
             // (it differs between Duo's inner portrait display and
             // everything else, and can change on rotation/fold) - a
             // selection that isn't one of the offered detents is invalid.
-            .onChange(of: restingDetent(proxy), initial: true) { _, resting in
-                if sheetDetent != .large { sheetDetent = resting }
+            .onChange(of: SheetStops(resting: restingDetent(proxy), middle: middleDetent(proxy)), initial: true) { old, new in
+                if sheetDetent == .large { return }
+                if let newMiddle = new.middle, sheetDetent == newMiddle { return }
+                // On the middle stop and it moved: follow it, don't drop to small.
+                if let oldMiddle = old.middle, let newMiddle = new.middle, sheetDetent == oldMiddle { sheetDetent = newMiddle; return }
+                sheetDetent = new.resting
+            }
+            // Measured stops only exist for a regular iPhone; forget them if the
+            // layout becomes one that goes without (a fold, a Split View pane).
+            .onChange(of: offersMiddleDetent(proxy)) { _, offered in
+                if !offered { measuredSmallHeight = nil; measuredMiddleHeight = nil; measuredBottomInset = 0 }
             }
     }
 
@@ -422,7 +500,7 @@ struct MainDashboardView: View {
         if layoutMode == .bottomPanel {
             return containerHeight * cardHeightFraction + Self.bottomCardMargin * 2
         }
-        return max(containerHeight * restingOccludedFraction - Self.attributionDrop, 0)
+        return max(restingOccludedHeight(containerHeight) - Self.attributionDrop, 0)
     }
 
     /// The part of the map the camera actually frames into. The bottom inset that
@@ -439,13 +517,6 @@ struct MainDashboardView: View {
     /// left that panning is skipped, so it doesn't constrain the zoom.
     private static let tallestPannedSheetFraction: CGFloat = 0.65
 
-    /// How much of the screen the bottom sheet currently covers. `PresentationDetent`
-    /// doesn't expose its fraction, so map the known detents back to their values.
-    /// Only two detents are offered now (small/large) - the middle one was
-    /// removed at the user's request.
-    private var sheetFraction: CGFloat {
-        sheetDetent == .large ? 0.92 : Self.smallestSheetFraction
-    }
 
     /// Width the side panel needs before it earns its place: 420pt of panel plus
     /// enough map beside it to still be worth looking at. Sits between iPad
@@ -545,19 +616,24 @@ struct MainDashboardView: View {
     private static let bottomCardMaxWidth: CGFloat = 560
     private static let bottomCardMargin: CGFloat = 20
 
-    /// Share of the height covered by whatever sits over the map's bottom.
-    private var occludedFraction: CGFloat {
-        layoutMode == .bottomPanel ? cardHeightFraction : sheetFraction
+    /// Height covered by whatever sits over the map's bottom.
+    private func occludedHeight(_ containerHeight: CGFloat) -> CGFloat {
+        layoutMode == .bottomPanel ? containerHeight * cardHeightFraction : currentSheetHeight(containerHeight)
     }
 
     /// The occlusion at rest, which is what the attribution has to clear.
-    private var restingOccludedFraction: CGFloat {
-        layoutMode == .bottomPanel ? cardHeightFraction : Self.smallestSheetFraction
+    private func restingOccludedHeight(_ containerHeight: CGFloat) -> CGFloat {
+        layoutMode == .bottomPanel ? containerHeight * cardHeightFraction : smallSheetHeight(containerHeight)
     }
 
     /// The most the map is ever covered, which is what the zoom keeps pins clear
     /// of. Both layouts stop panning past the same fraction.
-    private var tallestOccludedFraction: CGFloat { Self.tallestPannedSheetFraction }
+    /// The tallest cover the map still pans for: the middle stop where there is one.
+    private func tallestOccludedHeight(_ containerHeight: CGFloat) -> CGFloat {
+        measuredMiddleHeight != nil || measuredSmallHeight != nil
+            ? middleSheetHeight(containerHeight)
+            : containerHeight * Self.tallestPannedSheetFraction
+    }
 
     /// Fixed on purpose. A draggable edge meant the map's trailing inset changed
     /// on every gesture update, and re-framing the camera that often made the
@@ -714,6 +790,11 @@ struct MainDashboardView: View {
         }
         .onChange(of: sheetDetent) { _, _ in
             refitMap(containerHeight: fullHeight(proxy))
+        }
+        // The stops moved (measured, or content changed): re-frame the pins to
+        // the new heights, zoom included since it's sized to the tallest stop.
+        .onChange(of: [measuredSmallHeight ?? 0, measuredMiddleHeight ?? 0, measuredBottomInset]) { _, _ in
+            refitMap(containerHeight: fullHeight(proxy), refreshZoom: true)
         }
         // Menu commands whose state lives on this view.
         .onChange(of: menuCommands.pending) { _, command in
@@ -1116,7 +1197,7 @@ struct MainDashboardView: View {
         let span = fittedSpan ?? fittingSpan(for: coords, containerHeight: containerHeight)
         fittedSpan = span
 
-        let sheetHeight = containerHeight * occludedFraction
+        let sheetHeight = occludedHeight(containerHeight)
         // Near-fully covered: nothing meaningful left to aim at, so hold still
         // rather than panning the pins away.
         guard containerHeight - Self.mapTopMargin - sheetHeight > 120 else { return }
@@ -1176,7 +1257,7 @@ struct MainDashboardView: View {
         // Size against the *narrowest* strip we still pan for, so the pins stay
         // on screen with the sheet raised as well as at rest. Sizing to the
         // default height fitted more tightly but hid pins once the sheet grew.
-        let narrowestStrip = max(containerHeight - Self.mapTopMargin - containerHeight * tallestOccludedFraction, 1)
+        let narrowestStrip = max(containerHeight - Self.mapTopMargin - tallestOccludedHeight(containerHeight), 1)
         // The camera spans the usable area, so zoom out by however much taller
         // that is than the strip, leaving a margin so pins avoid the edges.
         let scale = (usableHeight(containerHeight) / narrowestStrip) / 0.8
@@ -1238,6 +1319,30 @@ struct DashboardSheetContent: View {
     let onAcknowledgeReport: () -> Void
     @Binding var selectedLogTab: LogTabChoice
     @Binding var sheetDetent: PresentationDetent
+    /// Regular iPhone only: reports the sheet height that ends just below the
+    /// Fuel Logs / Service Logs control (small stop) and just below the newest
+    /// log row (middle stop), so the parent can size those stops to what's actually on screen
+    /// rather than to a fraction that cuts through content whenever the layout
+    /// shifts (a maintenance alert appearing, larger text). Nil elsewhere -
+    /// Duo keeps its own tuned stops.
+    var onMeasureStops: ((_ small: CGFloat?, _ middle: CGFloat?, _ bottomInset: CGFloat) -> Void)? = nil
+    @State private var measuredHeaderHeight: CGFloat = 0
+    @State private var measuredLogTabsBottom: CGFloat?
+    @State private var measuredFirstRowBottom: CGFloat?
+    /// The sheet adds this much below the height a `.height` stop asks for (the
+    /// home-indicator area), and the scroll view bleeds into it - so a stop sized
+    /// to end below some content has to ask for that much less.
+    @State private var measuredSafeBottom: CGFloat = 0
+    /// Breathing room kept below the content each stop is sized to.
+    private static let stopMargin: CGFloat = 10
+    private static let scrollContentSpace = "dashboardScrollContent"
+
+    private struct StopMeasurements: Equatable {
+        var header: CGFloat
+        var logTabs: CGFloat?
+        var firstRow: CGFloat?
+        var safeBottom: CGFloat
+    }
     /// Width of Duo's outer-display reserved control column, or 0 elsewhere
     /// - see MainDashboardView.trailingClusterWidth(_:). Threaded in rather
     /// than measured locally, since the parent already has to compute it for
@@ -1367,6 +1472,7 @@ struct DashboardSheetContent: View {
         }
         VStack(spacing: 0) {
             headerBar
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { measuredHeaderHeight = $0 }
             ScrollView {
                 // No extra trailing inset needed for relocatedIconRow here,
                 // on any row - this content's own `.padding(.horizontal, 24)`
@@ -1431,6 +1537,7 @@ struct DashboardSheetContent: View {
                         // selected segment for just this instance.
                         .padding(3)
                         .background(Color.primary.opacity(0.16), in: Capsule())
+                        .onGeometryChange(for: CGFloat.self) { $0.frame(in: .named(Self.scrollContentSpace)).maxY } action: { measuredLogTabsBottom = $0 }
                         .padding(.horizontal, 24)
                         .padding(.bottom, 16)
 
@@ -1445,7 +1552,16 @@ struct DashboardSheetContent: View {
 
                     logViewArea
                 }
+                // Measured in the scroll content's own space, so scrolling doesn't
+                // move the numbers (and the stops with them).
+                .coordinateSpace(name: Self.scrollContentSpace)
             }
+        }
+        .onGeometryChange(for: CGFloat.self) { $0.safeAreaInsets.bottom } action: { measuredSafeBottom = $0 }
+        .onChange(of: StopMeasurements(header: measuredHeaderHeight, logTabs: measuredLogTabsBottom, firstRow: measuredFirstRowBottom, safeBottom: measuredSafeBottom), initial: true) { _, m in
+            guard let onMeasureStops, m.header > 0 else { return }
+            // Visible sheet heights (content bottom + margin); the parent subtracts the inset.
+            onMeasureStops(m.logTabs.map { m.header + $0 + Self.stopMargin }, m.firstRow.map { m.header + $0 + Self.stopMargin }, m.safeBottom)
         }
         // See `relocatedColumnNeedsManualInset`'s own doc comment: the real
         // outer-display case needs nothing here because a real safe area
@@ -1799,17 +1915,28 @@ struct DashboardSheetContent: View {
                     Button(role: .destructive) { showingDeleteConfirmation = true } label: { Label("Delete Vehicle", systemImage: "trash") }
                 }
             } label: {
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Text(vehicle.name)
-                        .font(.title2.weight(.heavy))
-                        .foregroundColor(.primary)
-                        // Single line, shrinking a long name to fit rather than
-                        // wrapping it - wrapping pushed the header taller and
-                        // crowded the row below it.
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.75)
-                        .allowsTightening(true)
-                    Image(systemName: "chevron.down").font(.subheadline.weight(.bold)).foregroundColor(.secondary)
+                // Where the four icons sit inline beside the name, the chevron goes
+                // under it: beside it, it cost the name enough width to be cut
+                // short ("Post-Erase T..."). Where the icons are relocated or
+                // hidden (Duo) the name has the room, so the layout is unchanged.
+                let chevronBelow = !iconRowIsRelocated && !hidesInlineIcons
+                let nameText = Text(vehicle.name)
+                    .font(.title2.weight(.heavy))
+                    .foregroundColor(.primary)
+                // Single line, shrinking a long name to fit rather than
+                // wrapping it - wrapping pushed the header taller and
+                // crowded the row below it.
+                let chevron = Image(systemName: "chevron.down").font(.subheadline.weight(.bold)).foregroundColor(.secondary)
+                if chevronBelow {
+                    VStack(alignment: .leading, spacing: 0) {
+                        nameText.lineLimit(1).minimumScaleFactor(0.75).allowsTightening(true)
+                        chevron
+                    }
+                } else {
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        nameText.lineLimit(1).minimumScaleFactor(0.75).allowsTightening(true)
+                        chevron
+                    }
                 }
             }
             // The app is rounded throughout, so ask for it here too. UIKit draws
@@ -2071,25 +2198,38 @@ struct DashboardSheetContent: View {
     @ViewBuilder
     private var logViewArea: some View {
         VStack(spacing: 0) {
-            LazyVStack(alignment: .leading, spacing: 0) {
-                if filteredEvents.isEmpty {
-                    Text(searchText.isEmpty ? (selectedLogTab == .fuel ? "No logs yet." : "No service logs yet.") : "No logs match your search.")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 24)
-                        .padding(.top, 8)
-                        .padding(.bottom, 16)
-                } else {
-                    ForEach(Array(filteredEvents.enumerated()), id: \.element.id) { index, event in
-                        let prevOdo: Double? = selectedLogTab == .fuel ? filteredEvents[(index + 1)...].first(where: { $0.odometer != nil })?.odometer : nil
-                        TimelineRow(event: event, isFirst: index == 0, isLast: index == filteredEvents.count - 1, previousOdometer: prevOdo, distanceUnit: vehicle.odometerUnit.rawValue.lowercased())
-                            .contentShape(Rectangle())
-                            .onTapGesture { eventToEdit = event }
-                            .contextMenu { Button("Edit") { eventToEdit = event }; Button("Delete", role: .destructive) { deleteEvent(event) } }
+            if filteredEvents.isEmpty {
+                Text(searchText.isEmpty ? (selectedLogTab == .fuel ? "No logs yet." : "No service logs yet.") : "No logs match your search.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 24)
+                    .padding(.top, 8)
+                    .padding(.bottom, 16)
+            } else {
+                // The newest row is built outright rather than lazily: below the
+                // pill's resting height it's off screen, a lazy list wouldn't build
+                // it, and its bottom edge is what sizes the middle stop.
+                logRow(index: 0, event: filteredEvents[0])
+                    .background {
+                        Color.clear
+                            .onGeometryChange(for: CGFloat.self) { $0.frame(in: .named(Self.scrollContentSpace)).maxY } action: { measuredFirstRowBottom = $0 }
+                            .onDisappear { measuredFirstRowBottom = nil }
+                    }
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    ForEach(Array(filteredEvents.enumerated()).dropFirst(), id: \.element.id) { index, event in
+                        logRow(index: index, event: event)
                     }
                 }
             }
         }.padding(.bottom, 100)
+    }
+
+    private func logRow(index: Int, event: VehicleEvent) -> some View {
+        let prevOdo: Double? = selectedLogTab == .fuel ? filteredEvents[(index + 1)...].first(where: { $0.odometer != nil })?.odometer : nil
+        return TimelineRow(event: event, isFirst: index == 0, isLast: index == filteredEvents.count - 1, previousOdometer: prevOdo, distanceUnit: vehicle.odometerUnit.rawValue.lowercased())
+            .contentShape(Rectangle())
+            .onTapGesture { eventToEdit = event }
+            .contextMenu { Button("Edit") { eventToEdit = event }; Button("Delete", role: .destructive) { deleteEvent(event) } }
     }
     
     /// Archives the current vehicle and moves to another, if there is one.
