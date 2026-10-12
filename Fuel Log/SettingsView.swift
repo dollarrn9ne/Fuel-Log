@@ -550,7 +550,7 @@ struct SettingsView: View {
                         }
                     }
                 if smartRemindersEnabled {
-                    Text("We remind you when your next service is due; whichever comes first: distance (e.g., 5,000 mi) or time (e.g., 6 months). All predictions run privately, on-device.")
+                    Text("We remind you when your next service is due; whichever comes first: distance (e.g., 5,000 mi) or time (e.g., 6 months). For diesels that track AdBlue / DEF, we also remind you when it should be running low. All predictions run privately, on-device.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
