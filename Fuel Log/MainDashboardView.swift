@@ -85,7 +85,7 @@ struct MainDashboardView: View {
     @State private var sheetDetent: PresentationDetent = .fraction(0.42)
     /// Sheet heights measured from the content on a regular iPhone (see
     /// `DashboardSheetContent.onMeasureStops`): the small stop ends just below
-    /// "View Trends & Charts", the middle one just below the newest log row.
+    /// the Fuel Logs / Service Logs control, the middle one just below the newest log row.
     /// Both stay nil on Duo, which keeps its own stops.
     @State private var measuredSmallHeight: CGFloat?
     @State private var measuredMiddleHeight: CGFloat?
@@ -1319,15 +1319,15 @@ struct DashboardSheetContent: View {
     let onAcknowledgeReport: () -> Void
     @Binding var selectedLogTab: LogTabChoice
     @Binding var sheetDetent: PresentationDetent
-    /// Regular iPhone only: reports the sheet height that ends just below "View
-    /// Trends & Charts" (small stop) and just below the newest log row (middle
-    /// stop), so the parent can size those stops to what's actually on screen
+    /// Regular iPhone only: reports the sheet height that ends just below the
+    /// Fuel Logs / Service Logs control (small stop) and just below the newest
+    /// log row (middle stop), so the parent can size those stops to what's actually on screen
     /// rather than to a fraction that cuts through content whenever the layout
     /// shifts (a maintenance alert appearing, larger text). Nil elsewhere -
     /// Duo keeps its own tuned stops.
     var onMeasureStops: ((_ small: CGFloat?, _ middle: CGFloat?, _ bottomInset: CGFloat) -> Void)? = nil
     @State private var measuredHeaderHeight: CGFloat = 0
-    @State private var measuredTrendsBottom: CGFloat?
+    @State private var measuredLogTabsBottom: CGFloat?
     @State private var measuredFirstRowBottom: CGFloat?
     /// The sheet adds this much below the height a `.height` stop asks for (the
     /// home-indicator area), and the scroll view bleeds into it - so a stop sized
@@ -1339,7 +1339,7 @@ struct DashboardSheetContent: View {
 
     private struct StopMeasurements: Equatable {
         var header: CGFloat
-        var trends: CGFloat?
+        var logTabs: CGFloat?
         var firstRow: CGFloat?
         var safeBottom: CGFloat
     }
@@ -1522,8 +1522,6 @@ struct DashboardSheetContent: View {
                             .applyLiquidGlassOrBackground(cornerRadius: 16)
                             .hoverEffect(.highlight)
                         }
-                        .onGeometryChange(for: CGFloat.self) { $0.frame(in: .named(Self.scrollContentSpace)).maxY } action: { measuredTrendsBottom = $0 }
-                        .onDisappear { measuredTrendsBottom = nil }
                         .padding(.horizontal, 24)
                         .padding(.bottom, 24)
                     }
@@ -1539,6 +1537,7 @@ struct DashboardSheetContent: View {
                         // selected segment for just this instance.
                         .padding(3)
                         .background(Color.primary.opacity(0.16), in: Capsule())
+                        .onGeometryChange(for: CGFloat.self) { $0.frame(in: .named(Self.scrollContentSpace)).maxY } action: { measuredLogTabsBottom = $0 }
                         .padding(.horizontal, 24)
                         .padding(.bottom, 16)
 
@@ -1559,10 +1558,10 @@ struct DashboardSheetContent: View {
             }
         }
         .onGeometryChange(for: CGFloat.self) { $0.safeAreaInsets.bottom } action: { measuredSafeBottom = $0 }
-        .onChange(of: StopMeasurements(header: measuredHeaderHeight, trends: measuredTrendsBottom, firstRow: measuredFirstRowBottom, safeBottom: measuredSafeBottom), initial: true) { _, m in
+        .onChange(of: StopMeasurements(header: measuredHeaderHeight, logTabs: measuredLogTabsBottom, firstRow: measuredFirstRowBottom, safeBottom: measuredSafeBottom), initial: true) { _, m in
             guard let onMeasureStops, m.header > 0 else { return }
             // Visible sheet heights (content bottom + margin); the parent subtracts the inset.
-            onMeasureStops(m.trends.map { m.header + $0 + Self.stopMargin }, m.firstRow.map { m.header + $0 + Self.stopMargin }, m.safeBottom)
+            onMeasureStops(m.logTabs.map { m.header + $0 + Self.stopMargin }, m.firstRow.map { m.header + $0 + Self.stopMargin }, m.safeBottom)
         }
         // See `relocatedColumnNeedsManualInset`'s own doc comment: the real
         // outer-display case needs nothing here because a real safe area
