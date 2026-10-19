@@ -92,6 +92,9 @@ struct MainDashboardView: View {
     /// What the sheet adds below a `.height` stop (home-indicator area). The
     /// measured heights are *visible* heights; a stop asks for that minus this.
     @State private var measuredBottomInset: CGFloat = 0
+    /// Duo's outer display: the resting pill's real top edge (global Y), measured
+    /// by the sheet content. Nil elsewhere.
+    @State private var measuredOuterRestingTop: CGFloat?
     @State private var selectedLogTab: LogTabChoice = .fuel
     @StateObject private var locationManager = CurrentLocationManager()
     @State private var isMapReady = false
@@ -441,7 +444,8 @@ struct MainDashboardView: View {
 
     /// The small stop's height (measured on a regular iPhone).
     private func smallSheetHeight(_ containerHeight: CGFloat) -> CGFloat {
-        measuredSmallHeight ?? containerHeight * Self.smallestSheetFraction
+        if let top = measuredOuterRestingTop { return max(containerHeight - top, 0) }
+        return measuredSmallHeight ?? containerHeight * Self.smallestSheetFraction
     }
 
     /// How much of the screen the sheet covers at its current stop, which is
@@ -465,6 +469,8 @@ struct MainDashboardView: View {
             if abs(inset - measuredBottomInset) > 0.5 { measuredBottomInset = inset }
             if small != measuredSmallHeight, abs((small ?? -100) - (measuredSmallHeight ?? -200)) > 0.5 { measuredSmallHeight = small }
             if middle != measuredMiddleHeight, abs((middle ?? -100) - (measuredMiddleHeight ?? -200)) > 0.5 { measuredMiddleHeight = middle }
+        } : nil, onMeasureRestingTop: trailingClusterWidth(proxy) > 0 ? { top in
+            if measuredOuterRestingTop == nil || abs(top - (measuredOuterRestingTop ?? 0)) > 0.5 { measuredOuterRestingTop = top }
         } : nil, clusterWidth: sheetIconClusterWidth(proxy), screenHeight: fullHeight(proxy), relocatedColumnNeedsManualInset: trailingClusterWidth(proxy) == 0, hidesInlineIcons: isLeadingSplitViewPane(proxy), leadingPaneIconColumn: isLeadingSplitViewPane(proxy), showingAddFillUp: $showingAddFillUp, fillUpEntryMode: $fillUpEntryMode, showingAddService: $showingAddService, showingTrips: $showingTrips, showingSettings: $showingSettings, showingArchivedVehicles: $showingArchivedVehicles, showingAddVehicle: $showingAddVehicle, showingDeleteConfirmation: $showingDeleteConfirmation, showingCharts: $showingCharts, showingMonthlyReport: $showingMonthlyReport, monthlyReportMonth: $monthlyReportMonth, eventToEdit: $eventToEdit, vehicleToEdit: $vehicleToEdit)
             .presentationDetents(middleDetent(proxy).map { [restingDetent(proxy), $0, .large] } ?? [restingDetent(proxy), .large], selection: $sheetDetent)
             .presentationDragIndicator(.visible).presentationBackgroundInteraction(.enabled(upThrough: middleDetent(proxy) ?? restingDetent(proxy))).interactiveDismissDisabled()
@@ -666,6 +672,16 @@ struct MainDashboardView: View {
         UIDevice.current.userInterfaceIdiom == .phone
     }
 
+    /// How much of the map's trailing edge the panel covers, which is what the
+    /// camera centres the pins clear of. Normally the panel's own width - but in
+    /// book mode Duo's panel slides over to the hinge and covers the whole right
+    /// half, and framing against the narrower fixed width centred the pins in an
+    /// area wider than the one actually visible, leaving them crowding the hinge.
+    private func mapTrailingCover(_ proxy: GeometryProxy) -> CGFloat {
+        guard usesDuoSidePanelChrome, hingeIsPartiallyOpen else { return panelWidth(proxy) }
+        return max(proxy.size.width - panelLeadingEdge(proxy), panelWidth(proxy))
+    }
+
     /// Which of the two width constants above applies, based on idiom - see
     /// `duoPanelWidth`'s own comment for why Duo needs a narrower one.
     private func panelWidth(_ proxy: GeometryProxy) -> CGFloat {
@@ -700,7 +716,7 @@ struct MainDashboardView: View {
                               // Beside the map, the panel occludes the trailing edge
                               // rather than the bottom, so the attribution and the
                               // camera both need the inset over there instead.
-                              trailingPadding: layout(proxy) == .sidePanel ? panelWidth(proxy) : 0,
+                              trailingPadding: layout(proxy) == .sidePanel ? mapTrailingCover(proxy) : 0,
                               onCameraChange: { region in
                     adoptUserZoom(region.span)
                 })
@@ -790,6 +806,27 @@ struct MainDashboardView: View {
         }
         .onChange(of: sheetDetent) { _, _ in
             refitMap(containerHeight: fullHeight(proxy))
+        }
+        // Book mode moves the panel to the hinge without changing the layout mode,
+        // so the layout handler above never runs; re-centre the pins in what's left.
+        .onChange(of: hingeIsPartiallyOpen) { _, _ in
+            Task { refitMap(containerHeight: fullHeight(proxy), refreshZoom: true) }
+        }
+        // Folding Duo between its displays changes the screen but not always the
+        // layout mode (the inner display in portrait and the outer one are both the
+        // bottom sheet), so the handler above stays quiet and the camera keeps the
+        // zoom fitted for the other screen - the outer display ended up zoomed out
+        // to the inner one's. Re-fit when the screen really changes size. Duo only:
+        // a regular iPhone or iPad never takes this branch.
+        .onChange(of: proxy.size) { old, new in
+            guard usesDuoSidePanelChrome, trailingClusterWidth(proxy) > 0 || sheetIconClusterWidth(proxy) > 0,
+                  abs(new.width - old.width) > 40 || abs(new.height - old.height) > 40 else { return }
+            if trailingClusterWidth(proxy) == 0 { measuredOuterRestingTop = nil }
+            Task { refitMap(containerHeight: fullHeight(proxy), refreshZoom: true) }
+        }
+        // The outer display's real pill top arrived: lift the attribution to match.
+        .onChange(of: measuredOuterRestingTop) { _, _ in
+            refitMap(containerHeight: fullHeight(proxy), refreshZoom: true)
         }
         // The stops moved (measured, or content changed): re-frame the pins to
         // the new heights, zoom included since it's sized to the tallest stop.
@@ -1326,6 +1363,12 @@ struct DashboardSheetContent: View {
     /// shifts (a maintenance alert appearing, larger text). Nil elsewhere -
     /// Duo keeps its own tuned stops.
     var onMeasureStops: ((_ small: CGFloat?, _ middle: CGFloat?, _ bottomInset: CGFloat) -> Void)? = nil
+    /// Duo's outer display only: reports where the resting pill's top edge really
+    /// is, so the parent can lift the Apple Maps attribution clear of it. The
+    /// pill there is taller than the 42% the attribution was sized for, which
+    /// left the logo half-hidden behind it.
+    var onMeasureRestingTop: ((CGFloat) -> Void)? = nil
+    @State private var restingTopReported = false
     @State private var measuredHeaderHeight: CGFloat = 0
     @State private var measuredLogTabsBottom: CGFloat?
     @State private var measuredFirstRowBottom: CGFloat?
@@ -1596,6 +1639,11 @@ struct DashboardSheetContent: View {
             // one arrives. Skipped when screenHeight isn't known (0).
             let expectedTop = screenHeight - restingPillHeight
             if screenHeight > 0, abs(frame.minY - expectedTop) > screenHeight * 0.1 { return }
+            // First settled report only, for the same reason as the icon target below.
+            if let onMeasureRestingTop, !restingTopReported, sheetDetent != .large {
+                restingTopReported = true
+                onMeasureRestingTop(frame.minY)
+            }
             let newTarget = frame.minY + (frame.height - Self.relocatedIconColumnHeight) / 2 + Self.measuredFrameCorrection
             // Only the first capture, deliberately - `sheetDetent` only
             // updates once a drag *settles* on a new detent, but this
@@ -1611,6 +1659,9 @@ struct DashboardSheetContent: View {
             guard measuredRestingIconTargetY == nil, sheetDetent != .large else { return }
             measuredRestingIconTargetY = newTarget
         })
+        // A different screen (folding between Duo's displays) has a different
+        // resting pill, so measure it again.
+        .onChange(of: screenHeight) { _, _ in restingTopReported = false }
         }
         // Presentations for this content's own actions. Nested here rather
         // than on MainDashboardView: on iPhone this view is itself always
