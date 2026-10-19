@@ -605,6 +605,20 @@ struct SettingsView: View {
                 // iPad's multitasking makes that drag a real path to expect.
                 .onDrop(of: [.commaSeparatedText, .plainText], isTargeted: $isTargetingCSVDrop) { handleCSVDrop($0) }
                 .listRowBackground(isTargetingCSVDrop ? Color.accentColor.opacity(0.15) : nil)
+
+                // Imports from older exports or other apps have stop names but no
+                // positions; this looks them up in Apple Maps (it also runs on its own
+                // after an import).
+                let geocoder = LocationGeocoder.shared
+                Button { geocoder.fillMissingInBackground(modelContext: modelContext, retryMisses: true) } label: { Label("Find Map Locations", systemImage: "mappin.and.ellipse") }
+                    .disabled(geocoder.isRunning)
+                if geocoder.isRunning {
+                    ProgressView(value: Double(geocoder.processed), total: Double(max(geocoder.total, 1)))
+                    Text("Looking up \(geocoder.processed) of \(geocoder.total) stops...").font(.caption).foregroundStyle(.secondary)
+                } else if let result = geocoder.lastResult {
+                    Text(result).font(.caption).foregroundStyle(.secondary)
+                }
+                Text("Looks up map positions for stops that were imported with only a name, using Apple Maps. A stop is only placed when its name and city match, so some may stay off the map.").font(.caption).foregroundStyle(.secondary)
         }
     }
 
