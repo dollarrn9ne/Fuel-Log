@@ -131,7 +131,12 @@ class CSVImporter: ObservableObject {
             let date = dateFormatter.date(from: dateStr) ?? parseFlexibleDate(dateStr) ?? Date()
             let odo = Double(odoStr)
             let cost = Double(costStr) ?? 0
-            let loc: GasLocation? = locStr.isEmpty ? nil : resolveLocation(name: locStr, latitude: 0, longitude: 0, cache: &existingLocations, modelContext: modelContext)
+            // Latitude / Longitude are optional trailing columns (18, 19); files from
+            // before they existed, and other apps' exports, have none.
+            let latitude = row.count > 18 ? Double(row[18]) : nil
+            let longitude = row.count > 19 ? Double(row[19]) : nil
+            let hasValidCoordinates = latitude.map { abs($0) <= 90 } == true && longitude.map { abs($0) <= 180 } == true
+            let loc: GasLocation? = locStr.isEmpty ? nil : resolveLocation(name: locStr, latitude: hasValidCoordinates ? latitude ?? 0 : 0, longitude: hasValidCoordinates ? longitude ?? 0 : 0, cache: &existingLocations, modelContext: modelContext)
 
             if recordType == "Fuel" {
                 let components = detailsStr.components(separatedBy: " ")
@@ -174,6 +179,12 @@ class CSVImporter: ObservableObject {
     /// location-suggestion lists.
     private func resolveLocation(name: String, latitude: Double, longitude: Double, cache: inout [GasLocation], modelContext: ModelContext) -> GasLocation {
         if let existing = GasLocation.matching(name: name, latitude: latitude, longitude: longitude, in: cache) {
+            // A name-only record from an earlier import gains its position once a
+            // file that has one comes along.
+            if !existing.hasCoordinates, latitude != 0 || longitude != 0 {
+                existing.latitude = latitude
+                existing.longitude = longitude
+            }
             return existing
         }
         let loc = GasLocation(name: name, latitude: latitude, longitude: longitude)
