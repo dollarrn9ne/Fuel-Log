@@ -33,6 +33,15 @@ import FuelLogShared
 /// Charts"; requested directly: nothing below that button until the pill is
 /// raised. 259pt is calibrated on-device to end just below it, with the
 /// segmented control hidden.
+/// Applies an accessibility label only when one is given, so a button that
+/// doesn't pass one keeps the label the system derives from its symbol.
+private struct OptionalAccessibilityLabel: ViewModifier {
+    let label: String?
+    @ViewBuilder func body(content: Content) -> some View {
+        if let label { content.accessibilityLabel(label) } else { content }
+    }
+}
+
 struct DuoInnerRestingPillDetent: CustomPresentationDetent {
     static let fixedHeight: CGFloat = 259
 
@@ -92,6 +101,26 @@ struct MainDashboardView: View {
     /// What the sheet adds below a `.height` stop (home-indicator area). The
     /// measured heights are *visible* heights; a stop asks for that minus this.
     @State private var measuredBottomInset: CGFloat = 0
+    /// Whether the layout is one that offers the middle stop (a regular iPhone),
+    /// tracked here on the view itself. The measured heights above belong to that
+    /// layout only; while folding, Duo passes through a size that looks like one,
+    /// so they were measured there and then left behind - the clean-up lived in the
+    /// sheet, which doesn't exist in book mode - and the outer display ended up
+    /// framing its map against a regular iPhone's middle stop (zoomed far out).
+    @State private var sheetOffersMiddle = false
+    /// Duo's outer display: the resting pill's real top edge (global Y), measured
+    /// by the sheet content. Nil elsewhere.
+    @State private var measuredOuterRestingTop: CGFloat?
+    /// Book mode on Duo: the panel slides over to the hinge and covers this much
+    /// of the map's width (0 otherwise), and the map's own width. The map's
+    /// padding stays at the fixed panel width - changing a Map's safe-area padding
+    /// relayouts it and blanked the tiles for about a second - so the camera is
+    /// offset instead (see `bookModeAreas`).
+    @State private var bookModeCover: CGFloat = 0
+    @State private var mapViewWidth: CGFloat = 0
+    /// The pending re-fit after a resize or posture change, so it runs once the
+    /// size has stopped changing rather than at a transitional size mid-fold.
+    @State private var mapSettleTask: Task<Void, Never>?
     @State private var selectedLogTab: LogTabChoice = .fuel
     @StateObject private var locationManager = CurrentLocationManager()
     @State private var isMapReady = false
@@ -281,7 +310,7 @@ struct MainDashboardView: View {
     /// shape drawn inside it. Sizing the label to `mapControlButtonDiameter`
     /// *before* the glassEffect is what actually forces a true circle.
     @ViewBuilder
-    private func mapControlButton(systemImage: String, action: @escaping () -> Void) -> some View {
+    private func mapControlButton(systemImage: String, accessibilityLabel: String? = nil, action: @escaping () -> Void) -> some View {
         if #available(iOS 26.0, *) {
             Button(action: action) {
                 Image(systemName: systemImage).font(.title3).foregroundColor(.primary)
@@ -290,11 +319,44 @@ struct MainDashboardView: View {
             }
             .buttonStyle(.plain)
             .hoverEffect(.highlight)
+            .modifier(OptionalAccessibilityLabel(label: accessibilityLabel))
         } else {
             Button(action: action) { Image(systemName: systemImage).font(.title3).foregroundColor(.primary).padding(12).background(.regularMaterial).clipShape(Circle()).shadow(radius: 2) }
                 .frame(width: Self.mapControlButtonDiameter, height: Self.mapControlButtonDiameter)
                 .hoverEffect(.highlight)
+                .modifier(OptionalAccessibilityLabel(label: accessibilityLabel))
         }
+    }
+
+    /// Re-frames the map on this vehicle's pins, the same way it opens: every pin
+    /// fitted for several, a close view of a single pin, and the user's location
+    /// when there are none. For when a pinch or pan has left the map too far in or
+    /// out to find its way back.
+    private func recenterMap(_ proxy: GeometryProxy) {
+        let mapEvents = displayedEvents.filter { $0.coordinate != nil }
+        if mapEvents.isEmpty {
+            if let loc = locationManager.location {
+                withAnimation(.easeInOut(duration: 0.5)) { mapPosition = .region(MKCoordinateRegion(center: loc.coordinate, latitudinalMeters: 5000, longitudinalMeters: 5000)) }
+            } else {
+                locationManager.onLocationUpdate = { loc in
+                    withAnimation(.easeInOut(duration: 0.5)) { mapPosition = .region(MKCoordinateRegion(center: loc.coordinate, latitudinalMeters: 5000, longitudinalMeters: 5000)) }
+                    locationManager.onLocationUpdate = nil
+                }
+                locationManager.requestLocation()
+            }
+        } else if mapEvents.count == 1, let coord = mapEvents.first?.coordinate {
+            fittedSpan = nil
+            withAnimation(.easeInOut(duration: 0.5)) { mapPosition = .region(MKCoordinateRegion(center: coord, latitudinalMeters: 5000, longitudinalMeters: 5000)) }
+        } else {
+            refitMap(containerHeight: fullHeight(proxy), refreshZoom: true)
+        }
+    }
+
+    /// The recenter button, shown under the locate button wherever the map's
+    /// floating controls are.
+    @ViewBuilder
+    private func recenterMapButton(_ proxy: GeometryProxy) -> some View {
+        mapControlButton(systemImage: "viewfinder", accessibilityLabel: "Recenter map") { recenterMap(proxy) }
     }
 
     /// How much further left the reserved column's true centre sits than
@@ -341,6 +403,7 @@ struct MainDashboardView: View {
                             locationManager.requestLocation()
                         }
                     }
+                    recenterMapButton(proxy)
                 }
                 .padding(.leading, 16)
                 .padding(.bottom, 16)
@@ -432,23 +495,24 @@ struct MainDashboardView: View {
     private static let middleStopCeiling: CGFloat = 0.8
 
     private func middleSheetHeight(_ containerHeight: CGFloat) -> CGFloat {
-        var height = measuredMiddleHeight ?? containerHeight * Self.tallestPannedSheetFraction
+        var height = (sheetOffersMiddle ? measuredMiddleHeight : nil) ?? containerHeight * Self.tallestPannedSheetFraction
         height = min(height, containerHeight * Self.middleStopCeiling)
         // Always clearly taller than the small stop, or the two blur together.
-        if let small = measuredSmallHeight { height = max(height, small + 80) }
+        if sheetOffersMiddle, let small = measuredSmallHeight { height = max(height, small + 80) }
         return height
     }
 
     /// The small stop's height (measured on a regular iPhone).
     private func smallSheetHeight(_ containerHeight: CGFloat) -> CGFloat {
-        measuredSmallHeight ?? containerHeight * Self.smallestSheetFraction
+        if let top = measuredOuterRestingTop { return max(containerHeight - top, 0) }
+        return (sheetOffersMiddle ? measuredSmallHeight : nil) ?? containerHeight * Self.smallestSheetFraction
     }
 
     /// How much of the screen the sheet covers at its current stop, which is
     /// what the map has to pan the pins clear of.
     private func currentSheetHeight(_ containerHeight: CGFloat) -> CGFloat {
         if sheetDetent == .large { return containerHeight * 0.92 }
-        if sheetDetent == .height(max(middleSheetHeight(containerHeight) - measuredBottomInset, 0)) { return middleSheetHeight(containerHeight) }
+        if sheetOffersMiddle, sheetDetent == .height(max(middleSheetHeight(containerHeight) - measuredBottomInset, 0)) { return middleSheetHeight(containerHeight) }
         return smallSheetHeight(containerHeight)
     }
 
@@ -465,6 +529,8 @@ struct MainDashboardView: View {
             if abs(inset - measuredBottomInset) > 0.5 { measuredBottomInset = inset }
             if small != measuredSmallHeight, abs((small ?? -100) - (measuredSmallHeight ?? -200)) > 0.5 { measuredSmallHeight = small }
             if middle != measuredMiddleHeight, abs((middle ?? -100) - (measuredMiddleHeight ?? -200)) > 0.5 { measuredMiddleHeight = middle }
+        } : nil, onMeasureRestingTop: trailingClusterWidth(proxy) > 0 ? { top in
+            if measuredOuterRestingTop == nil || abs(top - (measuredOuterRestingTop ?? 0)) > 0.5 { measuredOuterRestingTop = top }
         } : nil, clusterWidth: sheetIconClusterWidth(proxy), screenHeight: fullHeight(proxy), relocatedColumnNeedsManualInset: trailingClusterWidth(proxy) == 0, hidesInlineIcons: isLeadingSplitViewPane(proxy), leadingPaneIconColumn: isLeadingSplitViewPane(proxy), showingAddFillUp: $showingAddFillUp, fillUpEntryMode: $fillUpEntryMode, showingAddService: $showingAddService, showingTrips: $showingTrips, showingSettings: $showingSettings, showingArchivedVehicles: $showingArchivedVehicles, showingAddVehicle: $showingAddVehicle, showingDeleteConfirmation: $showingDeleteConfirmation, showingCharts: $showingCharts, showingMonthlyReport: $showingMonthlyReport, monthlyReportMonth: $monthlyReportMonth, eventToEdit: $eventToEdit, vehicleToEdit: $vehicleToEdit)
             .presentationDetents(middleDetent(proxy).map { [restingDetent(proxy), $0, .large] } ?? [restingDetent(proxy), .large], selection: $sheetDetent)
             .presentationDragIndicator(.visible).presentationBackgroundInteraction(.enabled(upThrough: middleDetent(proxy) ?? restingDetent(proxy))).interactiveDismissDisabled()
@@ -480,11 +546,7 @@ struct MainDashboardView: View {
                 if let oldMiddle = old.middle, let newMiddle = new.middle, sheetDetent == oldMiddle { sheetDetent = newMiddle; return }
                 sheetDetent = new.resting
             }
-            // Measured stops only exist for a regular iPhone; forget them if the
-            // layout becomes one that goes without (a fold, a Split View pane).
-            .onChange(of: offersMiddleDetent(proxy)) { _, offered in
-                if !offered { measuredSmallHeight = nil; measuredMiddleHeight = nil; measuredBottomInset = 0 }
-            }
+
     }
 
     /// MapKit leaves its own margin above the inset before drawing the Apple Maps
@@ -630,7 +692,7 @@ struct MainDashboardView: View {
     /// of. Both layouts stop panning past the same fraction.
     /// The tallest cover the map still pans for: the middle stop where there is one.
     private func tallestOccludedHeight(_ containerHeight: CGFloat) -> CGFloat {
-        measuredMiddleHeight != nil || measuredSmallHeight != nil
+        sheetOffersMiddle && (measuredMiddleHeight != nil || measuredSmallHeight != nil)
             ? middleSheetHeight(containerHeight)
             : containerHeight * Self.tallestPannedSheetFraction
     }
@@ -774,7 +836,14 @@ struct MainDashboardView: View {
             if layout(proxy) == .bottomPanel { bottomPanel(proxy) }
         }
         .modifier(HingeTracker(isPartiallyOpen: $hingeIsPartiallyOpen))
-        .onAppear { layoutMode = layout(proxy) }
+        .onAppear { layoutMode = layout(proxy); updateMapArea(proxy) }
+        // Measured stops only exist for a regular iPhone; forget them as soon as the
+        // layout stops being one (a fold, a Split View pane). Here rather than in
+        // the sheet, which isn't on screen in the layouts that need this to run.
+        .onChange(of: offersMiddleDetent(proxy), initial: true) { _, offered in
+            sheetOffersMiddle = offered
+            if !offered { measuredSmallHeight = nil; measuredMiddleHeight = nil; measuredBottomInset = 0 }
+        }
         .onChange(of: layout(proxy)) { _, mode in
             // Animated so a resize crossing the threshold reads as the panel
             // moving rather than one layout being swapped for another.
@@ -790,6 +859,27 @@ struct MainDashboardView: View {
         }
         .onChange(of: sheetDetent) { _, _ in
             refitMap(containerHeight: fullHeight(proxy))
+        }
+        // Book mode moves the panel to the hinge without changing the layout mode,
+        // so the layout handler above never runs; re-centre the pins in what's left.
+        .onChange(of: hingeIsPartiallyOpen) { _, _ in
+            scheduleSettledRefit(proxy)
+        }
+        // Folding Duo between its displays changes the screen but not always the
+        // layout mode (the inner display in portrait and the outer one are both the
+        // bottom sheet), so the handler above stays quiet and the camera keeps the
+        // zoom fitted for the other screen - the outer display ended up zoomed out
+        // to the inner one's. Re-fit when the screen really changes size. Duo only:
+        // a regular iPhone or iPad never takes this branch.
+        .onChange(of: proxy.size) { old, new in
+            guard usesDuoSidePanelChrome, trailingClusterWidth(proxy) > 0 || sheetIconClusterWidth(proxy) > 0,
+                  abs(new.width - old.width) > 40 || abs(new.height - old.height) > 40 else { return }
+            if trailingClusterWidth(proxy) == 0 { measuredOuterRestingTop = nil }
+            scheduleSettledRefit(proxy)
+        }
+        // The outer display's real pill top arrived: lift the attribution to match.
+        .onChange(of: measuredOuterRestingTop) { _, _ in
+            refitMap(containerHeight: fullHeight(proxy), refreshZoom: true)
         }
         // The stops moved (measured, or content changed): re-frame the pins to
         // the new heights, zoom included since it's sized to the tallest stop.
@@ -1013,6 +1103,7 @@ struct MainDashboardView: View {
                             locationManager.requestLocation()
                         }
                     }
+                    recenterMapButton(proxy)
                 }
                 .padding(.top, Self.sidePanelTopGroupClearance)
                 .padding(.trailing, trailingPadding)
@@ -1049,6 +1140,7 @@ struct MainDashboardView: View {
                             locationManager.requestLocation()
                         }
                     }
+                    recenterMapButton(proxy)
                 }
                 Spacer()
             }
@@ -1177,6 +1269,36 @@ struct MainDashboardView: View {
         return heights.min { abs($0 - fraction) < abs($1 - fraction) } ?? bottomCardRestingHeightFraction
     }
 
+    /// Book mode: the width the map frames into (its width minus the fixed panel
+    /// inset) against the width the user can actually see (left of the hinge).
+    private var bookModeAreas: (usable: CGFloat, visible: CGFloat)? {
+        guard bookModeCover > 0, mapViewWidth > 0 else { return nil }
+        let usable = mapViewWidth - Self.duoPanelWidth
+        let visible = mapViewWidth - bookModeCover
+        return (usable > 0 && visible > 0 && visible < usable) ? (usable, visible) : nil
+    }
+
+    private func updateMapArea(_ proxy: GeometryProxy) {
+        mapViewWidth = proxy.size.width
+        bookModeCover = (usesDuoSidePanelChrome && hingeIsPartiallyOpen && layout(proxy) == .sidePanel)
+            ? max(proxy.size.width - panelLeadingEdge(proxy), 0)
+            : 0
+    }
+
+    /// Re-fits once the size has stopped changing: a fold passes through
+    /// transitional sizes, and fitting to one of those left the final screen at
+    /// the wrong zoom.
+    private func scheduleSettledRefit(_ proxy: GeometryProxy) {
+        updateMapArea(proxy)
+        let height = fullHeight(proxy)
+        mapSettleTask?.cancel()
+        mapSettleTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(400))
+            guard !Task.isCancelled else { return }
+            refitMap(containerHeight: height, refreshZoom: true)
+        }
+    }
+
     private func refitMap(containerHeight: CGFloat, refreshZoom: Bool = false) {
         let coords = displayedEvents.compactMap(\.coordinate)
         guard !coords.isEmpty, containerHeight > 0 else { return }
@@ -1187,10 +1309,21 @@ struct MainDashboardView: View {
         // the pins into: centre them and let the trailing inset keep them clear
         // of the panel. The vertical maths below is portrait-only by design.
         if layoutMode == .sidePanel {
-            let span = fittedSpan ?? sideBySideSpan(for: coords)
+            var span = fittedSpan ?? sideBySideSpan(for: coords)
+            if fittedSpan == nil, let areas = bookModeAreas {
+                // Zoom out so the pins fit the narrower area left of the hinge.
+                let factor = Double(areas.usable / areas.visible)
+                span = MKCoordinateSpan(latitudeDelta: span.latitudeDelta * factor, longitudeDelta: span.longitudeDelta * factor)
+            }
             fittedSpan = span
+            var centre = boundingCentre(of: coords)
+            if let areas = bookModeAreas {
+                // The camera centres on the padded area, which is wider than the
+                // visible one; shift it east so the pins land mid-way in what's seen.
+                centre.longitude += Double((areas.usable - areas.visible) / 2 / areas.usable) * span.longitudeDelta
+            }
             withAnimation(Self.mapReframeAnimation) {
-                mapPosition = .region(MKCoordinateRegion(center: boundingCentre(of: coords), span: span))
+                mapPosition = .region(MKCoordinateRegion(center: centre, span: span))
             }
             return
         }
@@ -1326,6 +1459,12 @@ struct DashboardSheetContent: View {
     /// shifts (a maintenance alert appearing, larger text). Nil elsewhere -
     /// Duo keeps its own tuned stops.
     var onMeasureStops: ((_ small: CGFloat?, _ middle: CGFloat?, _ bottomInset: CGFloat) -> Void)? = nil
+    /// Duo's outer display only: reports where the resting pill's top edge really
+    /// is, so the parent can lift the Apple Maps attribution clear of it. The
+    /// pill there is taller than the 42% the attribution was sized for, which
+    /// left the logo half-hidden behind it.
+    var onMeasureRestingTop: ((CGFloat) -> Void)? = nil
+    @State private var restingTopReported = false
     @State private var measuredHeaderHeight: CGFloat = 0
     @State private var measuredLogTabsBottom: CGFloat?
     @State private var measuredFirstRowBottom: CGFloat?
@@ -1596,6 +1735,11 @@ struct DashboardSheetContent: View {
             // one arrives. Skipped when screenHeight isn't known (0).
             let expectedTop = screenHeight - restingPillHeight
             if screenHeight > 0, abs(frame.minY - expectedTop) > screenHeight * 0.1 { return }
+            // First settled report only, for the same reason as the icon target below.
+            if let onMeasureRestingTop, !restingTopReported, sheetDetent != .large {
+                restingTopReported = true
+                onMeasureRestingTop(frame.minY)
+            }
             let newTarget = frame.minY + (frame.height - Self.relocatedIconColumnHeight) / 2 + Self.measuredFrameCorrection
             // Only the first capture, deliberately - `sheetDetent` only
             // updates once a drag *settles* on a new detent, but this
@@ -1611,6 +1755,9 @@ struct DashboardSheetContent: View {
             guard measuredRestingIconTargetY == nil, sheetDetent != .large else { return }
             measuredRestingIconTargetY = newTarget
         })
+        // A different screen (folding between Duo's displays) has a different
+        // resting pill, so measure it again.
+        .onChange(of: screenHeight) { _, _ in restingTopReported = false }
         }
         // Presentations for this content's own actions. Nested here rather
         // than on MainDashboardView: on iPhone this view is itself always
