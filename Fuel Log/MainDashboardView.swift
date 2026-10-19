@@ -33,6 +33,15 @@ import FuelLogShared
 /// Charts"; requested directly: nothing below that button until the pill is
 /// raised. 259pt is calibrated on-device to end just below it, with the
 /// segmented control hidden.
+/// Applies an accessibility label only when one is given, so a button that
+/// doesn't pass one keeps the label the system derives from its symbol.
+private struct OptionalAccessibilityLabel: ViewModifier {
+    let label: String?
+    @ViewBuilder func body(content: Content) -> some View {
+        if let label { content.accessibilityLabel(label) } else { content }
+    }
+}
+
 struct DuoInnerRestingPillDetent: CustomPresentationDetent {
     static let fixedHeight: CGFloat = 259
 
@@ -301,7 +310,7 @@ struct MainDashboardView: View {
     /// shape drawn inside it. Sizing the label to `mapControlButtonDiameter`
     /// *before* the glassEffect is what actually forces a true circle.
     @ViewBuilder
-    private func mapControlButton(systemImage: String, action: @escaping () -> Void) -> some View {
+    private func mapControlButton(systemImage: String, accessibilityLabel: String? = nil, action: @escaping () -> Void) -> some View {
         if #available(iOS 26.0, *) {
             Button(action: action) {
                 Image(systemName: systemImage).font(.title3).foregroundColor(.primary)
@@ -310,11 +319,44 @@ struct MainDashboardView: View {
             }
             .buttonStyle(.plain)
             .hoverEffect(.highlight)
+            .modifier(OptionalAccessibilityLabel(label: accessibilityLabel))
         } else {
             Button(action: action) { Image(systemName: systemImage).font(.title3).foregroundColor(.primary).padding(12).background(.regularMaterial).clipShape(Circle()).shadow(radius: 2) }
                 .frame(width: Self.mapControlButtonDiameter, height: Self.mapControlButtonDiameter)
                 .hoverEffect(.highlight)
+                .modifier(OptionalAccessibilityLabel(label: accessibilityLabel))
         }
+    }
+
+    /// Re-frames the map on this vehicle's pins, the same way it opens: every pin
+    /// fitted for several, a close view of a single pin, and the user's location
+    /// when there are none. For when a pinch or pan has left the map too far in or
+    /// out to find its way back.
+    private func recenterMap(_ proxy: GeometryProxy) {
+        let mapEvents = displayedEvents.filter { $0.coordinate != nil }
+        if mapEvents.isEmpty {
+            if let loc = locationManager.location {
+                withAnimation(.easeInOut(duration: 0.5)) { mapPosition = .region(MKCoordinateRegion(center: loc.coordinate, latitudinalMeters: 5000, longitudinalMeters: 5000)) }
+            } else {
+                locationManager.onLocationUpdate = { loc in
+                    withAnimation(.easeInOut(duration: 0.5)) { mapPosition = .region(MKCoordinateRegion(center: loc.coordinate, latitudinalMeters: 5000, longitudinalMeters: 5000)) }
+                    locationManager.onLocationUpdate = nil
+                }
+                locationManager.requestLocation()
+            }
+        } else if mapEvents.count == 1, let coord = mapEvents.first?.coordinate {
+            fittedSpan = nil
+            withAnimation(.easeInOut(duration: 0.5)) { mapPosition = .region(MKCoordinateRegion(center: coord, latitudinalMeters: 5000, longitudinalMeters: 5000)) }
+        } else {
+            refitMap(containerHeight: fullHeight(proxy), refreshZoom: true)
+        }
+    }
+
+    /// The recenter button, shown under the locate button wherever the map's
+    /// floating controls are.
+    @ViewBuilder
+    private func recenterMapButton(_ proxy: GeometryProxy) -> some View {
+        mapControlButton(systemImage: "viewfinder", accessibilityLabel: "Recenter map") { recenterMap(proxy) }
     }
 
     /// How much further left the reserved column's true centre sits than
@@ -361,6 +403,7 @@ struct MainDashboardView: View {
                             locationManager.requestLocation()
                         }
                     }
+                    recenterMapButton(proxy)
                 }
                 .padding(.leading, 16)
                 .padding(.bottom, 16)
@@ -1060,6 +1103,7 @@ struct MainDashboardView: View {
                             locationManager.requestLocation()
                         }
                     }
+                    recenterMapButton(proxy)
                 }
                 .padding(.top, Self.sidePanelTopGroupClearance)
                 .padding(.trailing, trailingPadding)
@@ -1096,6 +1140,7 @@ struct MainDashboardView: View {
                             locationManager.requestLocation()
                         }
                     }
+                    recenterMapButton(proxy)
                 }
                 Spacer()
             }
