@@ -376,6 +376,20 @@ struct RecordReadOnlyDetailView: View {
     var body: some View {
         NavigationStack {
             List {
+                // Where it happened. The pop-up covers most of the map it was opened
+                // from (and on Duo it docks over the map half), so the stop gets its
+                // own small map. Static: a pannable map inside a list fights the
+                // list's own scrolling.
+                if let coordinate = event.coordinate {
+                    Section {
+                        Map(initialPosition: .region(MKCoordinateRegion(center: coordinate, latitudinalMeters: 1500, longitudinalMeters: 1500)), interactionModes: []) {
+                            Marker(event.title, systemImage: event.icon, coordinate: coordinate).tint(event.color)
+                        }
+                        .frame(height: 180)
+                        .listRowInsets(EdgeInsets())
+                        .accessibilityLabel("Map showing \(event.title)")
+                    }
+                }
                 Section("Log Information") { LabeledContent("Location", value: event.title); LabeledContent("Date", value: event.date.formatted(date: .abbreviated, time: .shortened)); LabeledContent("Cost", value: event.cost.formatted(.currency(code: event.vehicle?.currencyRaw ?? "USD"))); if let odo = event.odometer { LabeledContent("Odometer", value: "\(Int(odo).formatted())") } }
                 switch event {
                 case .fillUp(let f):

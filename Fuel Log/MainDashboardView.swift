@@ -770,7 +770,15 @@ struct MainDashboardView: View {
                     .onChange(of: selectedEventID) { _, newID in
                         if let id = newID, let ev = displayedEvents.first(where: { $0.id == id }) { mapEventToView = ev; selectedEventID = nil }
                     }
-                    .sheet(item: $mapEventToView) { ev in RecordReadOnlyDetailView(event: ev) }
+                    // On Duo's inner display (flat or book mode) the pop-up docks to the
+                    // map's half, left of the panel/hinge, like the data-entry sheets;
+                    // everywhere else it keeps its normal placement.
+                    .sheet(item: $mapEventToView) { ev in
+                        RecordReadOnlyDetailView(event: ev)
+                            .roomySheetOnPad(duoLeadingWidth: usesDuoSidePanelChrome && layout(proxy) == .sidePanel
+                                ? max(panelLeadingEdge(proxy) - Self.duoSheetHingeMargin, 0)
+                                : nil)
+                    }
             }
             
             // Side panel gets its own consolidated copy of these controls
