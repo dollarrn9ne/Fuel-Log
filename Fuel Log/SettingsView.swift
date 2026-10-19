@@ -697,7 +697,7 @@ struct SettingsView: View {
         
         // "Fuel Grade" is appended as a trailing column so older importers that
         // read only the first eight fields keep working.
-        var csvString = "Vehicle,Record Type,Date,Odometer,Cost,Details,Location,Notes,Fuel Grade,Charger Type,Start %,End %,Minutes,Session Fee,Rate Plan,Off-Peak kWh,Fluid Volume,Filled To Full\n"
+        var csvString = "Vehicle,Record Type,Date,Odometer,Cost,Details,Location,Notes,Fuel Grade,Charger Type,Start %,End %,Minutes,Session Fee,Rate Plan,Off-Peak kWh,Fluid Volume,Filled To Full,Latitude,Longitude\n"
         let df = DateFormatter(); df.dateStyle = .short; df.timeStyle = .short
         let vehiclesToExport = targetVehicle == nil ? vehicles : [targetVehicle!]
         let totalEvents = vehiclesToExport.reduce(0) { $0 + ($1.fillUps ?? []).count + ($1.services ?? []).count }
@@ -705,11 +705,11 @@ struct SettingsView: View {
         
         for vehicle in vehiclesToExport {
             for f in (vehicle.fillUps ?? []) {
-                csvString.append("\"\(vehicle.name)\",\"Fuel\",\"\(df.string(from: f.date))\",\"\(f.odometer?.odometerString ?? "")\",\"\(f.totalCost)\",\"\(f.volume) \(f.unit.rawValue)\",\"\(f.location?.name.replacingOccurrences(of: "\"", with: "\"\"") ?? "")\",\"\(f.notes.replacingOccurrences(of: "\"", with: "\"\""))\",\"\(f.fuelGrade?.rawValue ?? "")\",\"\(f.chargerTypeRaw ?? "")\",\"\(f.startSoC.map { String($0) } ?? "")\",\"\(f.endSoC.map { String($0) } ?? "")\",\"\(f.durationMinutes.map { String($0) } ?? "")\",\"\(f.sessionFee.map { String($0) } ?? "")\",\"\(f.ratePlanName?.replacingOccurrences(of: "\"", with: "\"\"") ?? "")\",\"\(f.offPeakKWh.map { String($0) } ?? "")\",\"\",\"\"\n")
+                csvString.append("\"\(vehicle.name)\",\"Fuel\",\"\(df.string(from: f.date))\",\"\(f.odometer?.odometerString ?? "")\",\"\(f.totalCost)\",\"\(f.volume) \(f.unit.rawValue)\",\"\(f.location?.name.replacingOccurrences(of: "\"", with: "\"\"") ?? "")\",\"\(f.notes.replacingOccurrences(of: "\"", with: "\"\""))\",\"\(f.fuelGrade?.rawValue ?? "")\",\"\(f.chargerTypeRaw ?? "")\",\"\(f.startSoC.map { String($0) } ?? "")\",\"\(f.endSoC.map { String($0) } ?? "")\",\"\(f.durationMinutes.map { String($0) } ?? "")\",\"\(f.sessionFee.map { String($0) } ?? "")\",\"\(f.ratePlanName?.replacingOccurrences(of: "\"", with: "\"\"") ?? "")\",\"\(f.offPeakKWh.map { String($0) } ?? "")\",\"\",\"\",\(coordinateFields(f.location))\n")
                 currentCount += 1; if Int(currentCount) % 20 == 0 { exportProgress = currentCount / totalDouble; try? await Task.sleep(nanoseconds: 10_000_000) }
             }
             for s in (vehicle.services ?? []) {
-                csvString.append("\"\(vehicle.name)\",\"Service\",\"\(df.string(from: s.date))\",\"\(s.odometer.odometerString)\",\"\(s.cost)\",\"\(s.type.rawValue)\",\"\(s.location?.name.replacingOccurrences(of: "\"", with: "\"\"") ?? "")\",\"\(s.notes.replacingOccurrences(of: "\"", with: "\"\""))\",\"\",\"\",\"\",\"\",\"\",\"\",\"\",\"\",\"\(s.volume.map { String($0) } ?? "")\",\"\(s.filledToFull.map { $0 ? "1" : "0" } ?? "")\"\n")
+                csvString.append("\"\(vehicle.name)\",\"Service\",\"\(df.string(from: s.date))\",\"\(s.odometer.odometerString)\",\"\(s.cost)\",\"\(s.type.rawValue)\",\"\(s.location?.name.replacingOccurrences(of: "\"", with: "\"\"") ?? "")\",\"\(s.notes.replacingOccurrences(of: "\"", with: "\"\""))\",\"\",\"\",\"\",\"\",\"\",\"\",\"\",\"\",\"\(s.volume.map { String($0) } ?? "")\",\"\(s.filledToFull.map { $0 ? "1" : "0" } ?? "")\",\(coordinateFields(s.location))\n")
                 currentCount += 1; if Int(currentCount) % 20 == 0 { exportProgress = currentCount / totalDouble; try? await Task.sleep(nanoseconds: 10_000_000) }
             }
         }
@@ -717,6 +717,15 @@ struct SettingsView: View {
         csvDocument = CSVDocument(text: csvString, encoding: selectedEncoding.stringEncoding); isExporting = false; showFileExporter = true
     }
     
+    /// The location's coordinates as two quoted CSV fields (empty when it has
+    /// none). Without them an exported file only knew a stop's *name*, so
+    /// importing it elsewhere gave every location the same "no position" and the
+    /// map came back empty.
+    private func coordinateFields(_ location: GasLocation?) -> String {
+        guard let location, location.hasCoordinates else { return "\"\",\"\"" }
+        return "\"\(String(format: "%.6f", location.latitude))\",\"\(String(format: "%.6f", location.longitude))\""
+    }
+
     @MainActor private func performImport(data: String, source: ImportSource) async -> Int {
         let importer = CSVImporter()
         return await importer.performImport(data: data, source: source, modelContext: modelContext)
