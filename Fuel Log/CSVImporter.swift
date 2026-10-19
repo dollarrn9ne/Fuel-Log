@@ -59,7 +59,11 @@ class CSVImporter: ObservableObject {
             }
         }
 
-        return max(0, recordCount(modelContext) - before)
+        let added = max(0, recordCount(modelContext) - before)
+        // Stops with only a name (older exports, other apps' files) get their map
+        // positions looked up in the background; the pins appear as they resolve.
+        if added > 0 { LocationGeocoder.shared.fillMissingInBackground(modelContext: modelContext) }
+        return added
     }
     
     private func parseFlexibleDate(_ dateStr: String) -> Date? {
