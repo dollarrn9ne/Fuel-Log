@@ -770,14 +770,13 @@ struct MainDashboardView: View {
                     .onChange(of: selectedEventID) { _, newID in
                         if let id = newID, let ev = displayedEvents.first(where: { $0.id == id }) { mapEventToView = ev; selectedEventID = nil }
                     }
-                    // On Duo's inner display (flat or book mode) the pop-up docks to the
-                    // map's half, left of the panel/hinge, like the data-entry sheets;
-                    // everywhere else it keeps its normal placement.
+                    // With the side panel showing (Duo's inner display in flat or book
+                    // mode, or an iPad in landscape) the pop-up docks to the map's side,
+                    // left of the panel/hinge, like the data-entry sheets; everywhere
+                    // else it keeps its normal placement.
                     .sheet(item: $mapEventToView) { ev in
                         RecordReadOnlyDetailView(event: ev)
-                            .roomySheetOnPad(duoLeadingWidth: usesDuoSidePanelChrome && layout(proxy) == .sidePanel
-                                ? max(panelLeadingEdge(proxy) - Self.duoSheetHingeMargin, 0)
-                                : nil)
+                            .roomySheetOnPad(duoLeadingWidth: layout(proxy) == .sidePanel ? leadingSheetWidth(proxy) : nil)
                     }
             }
             
@@ -995,6 +994,18 @@ struct MainDashboardView: View {
     /// directly ("the left pill overlaps the hinge, move it a lil back left").
     private static let duoSheetHingeMargin: CGFloat = 16
 
+    /// How far the system insets a leading-docked sheet from the screen edge on
+    /// iPad (measured: the sheet's frame starts at x=25). The width has to leave
+    /// room for it, or the sheet's right edge lands that much past the panel.
+    private static let padSheetEdgeInset: CGFloat = 25
+
+    /// The width of a sheet docked to the map's side (left of the panel or hinge)
+    /// in the side-panel layouts, with a small gap kept clear of the panel.
+    private func leadingSheetWidth(_ proxy: GeometryProxy) -> CGFloat {
+        let inset = UIDevice.current.userInterfaceIdiom == .pad ? Self.padSheetEdgeInset : 0
+        return max(panelLeadingEdge(proxy) - Self.duoSheetHingeMargin - inset, 0)
+    }
+
     /// The content's displayed width: normally `panelWidth(_:)`, but wider
     /// in "book" mode to actually use the extra room gained by the leading
     /// edge moving to the hinge, rather than leaving it as empty glass
@@ -1008,7 +1019,7 @@ struct MainDashboardView: View {
     }
 
     private func sidePanel(_ proxy: GeometryProxy) -> some View {
-        DashboardSheetContent(colorScheme: _colorScheme, vehicle: vehicle, allVehicles: allVehicles, events: timelineEvents, onSelectVehicle: onSelectVehicle, newReportMonth: newReportMonth, onAcknowledgeReport: onAcknowledgeReport, selectedLogTab: $selectedLogTab, sheetDetent: .constant(.large), hidesInlineIcons: usesDuoSidePanelChrome, isSidePanelLayout: usesDuoSidePanelChrome, duoLeadingSheetWidth: usesDuoSidePanelChrome ? max(panelLeadingEdge(proxy) - Self.duoSheetHingeMargin, 0) : nil, showingAddFillUp: $showingAddFillUp, fillUpEntryMode: $fillUpEntryMode, showingAddService: $showingAddService, showingTrips: $showingTrips, showingSettings: $showingSettings, showingArchivedVehicles: $showingArchivedVehicles, showingAddVehicle: $showingAddVehicle, showingDeleteConfirmation: $showingDeleteConfirmation, showingCharts: $showingCharts, showingMonthlyReport: $showingMonthlyReport, monthlyReportMonth: $monthlyReportMonth, eventToEdit: $eventToEdit, vehicleToEdit: $vehicleToEdit)
+        DashboardSheetContent(colorScheme: _colorScheme, vehicle: vehicle, allVehicles: allVehicles, events: timelineEvents, onSelectVehicle: onSelectVehicle, newReportMonth: newReportMonth, onAcknowledgeReport: onAcknowledgeReport, selectedLogTab: $selectedLogTab, sheetDetent: .constant(.large), hidesInlineIcons: usesDuoSidePanelChrome, isSidePanelLayout: usesDuoSidePanelChrome, duoLeadingSheetWidth: leadingSheetWidth(proxy), showingAddFillUp: $showingAddFillUp, fillUpEntryMode: $fillUpEntryMode, showingAddService: $showingAddService, showingTrips: $showingTrips, showingSettings: $showingSettings, showingArchivedVehicles: $showingArchivedVehicles, showingAddVehicle: $showingAddVehicle, showingDeleteConfirmation: $showingDeleteConfirmation, showingCharts: $showingCharts, showingMonthlyReport: $showingMonthlyReport, monthlyReportMonth: $monthlyReportMonth, eventToEdit: $eventToEdit, vehicleToEdit: $vehicleToEdit)
             .frame(width: panelContentWidth(proxy))
             .frame(maxHeight: .infinity)
             .background(alignment: .leading) {
