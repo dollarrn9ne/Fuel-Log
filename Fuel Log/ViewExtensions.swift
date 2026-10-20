@@ -66,8 +66,9 @@ extension View {
     ///
     /// No effect on iPhone, where a sheet fills the width regardless.
     ///
-    /// - Parameter duoLeadingWidth: Duo's side panel only (`nil` everywhere
-    ///   else, including real iPad - unaffected). Docks the sheet to the
+    /// - Parameter duoLeadingWidth: The side panel layouts only - Duo's inner
+    ///   display and an iPad in landscape (`nil` everywhere else, which keeps
+    ///   the normal centred sheet). Docks the sheet to the
     ///   leading edge and caps its width at this value, in both fully-open
     ///   and book-mode poses - the app's own side panel always occupies the
     ///   trailing half (against the hinge in book mode), so the data-entry
