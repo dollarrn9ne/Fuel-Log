@@ -775,7 +775,7 @@ struct MainDashboardView: View {
                     // left of the panel/hinge, like the data-entry sheets; everywhere
                     // else it keeps its normal placement.
                     .sheet(item: $mapEventToView) { ev in
-                        RecordReadOnlyDetailView(event: ev)
+                        RecordReadOnlyDetailView(event: ev, doneOnLeading: isLeadingSplitViewPane(proxy))
                             .roomySheetOnPad(duoLeadingWidth: layout(proxy) == .sidePanel ? leadingSheetWidth(proxy) : nil)
                     }
             }
@@ -1830,7 +1830,7 @@ struct DashboardSheetContent: View {
             TripsListView(vehicle: vehicle)
         }
         .fullScreenCover(isPresented: $showingCharts) {
-            VehicleChartsView(vehicle: vehicle)
+            VehicleChartsView(vehicle: vehicle, closeAsIcon: leadingPaneIconColumn)
         }
         // Menu commands that open one of this view's presentations.
         .onChange(of: sheetMenuCommands.pending) { _, command in
