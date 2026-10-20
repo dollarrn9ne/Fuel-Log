@@ -373,6 +373,9 @@ struct TripMapView: View {
 struct RecordReadOnlyDetailView: View {
     @Environment(\.dismiss) private var dismiss
     let event: VehicleEvent
+    /// Duo's left pane of Split View keeps its controls on the leading side, so
+    /// Done moves there too.
+    var doneOnLeading: Bool = false
 
     /// Hands the stop to Apple Maps, named so it shows up as the stop's label.
     private func openInAppleMaps(_ coordinate: CLLocationCoordinate2D) {
@@ -448,7 +451,7 @@ struct RecordReadOnlyDetailView: View {
                 }
             }
             .navigationTitle(event.title).navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() }.font(.headline) } }
+            .toolbar { ToolbarItem(placement: doneOnLeading ? .topBarLeading : .topBarTrailing) { Button("Done") { dismiss() }.font(.headline) } }
         }
     }
 }
