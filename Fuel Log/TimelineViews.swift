@@ -373,21 +373,45 @@ struct TripMapView: View {
 struct RecordReadOnlyDetailView: View {
     @Environment(\.dismiss) private var dismiss
     let event: VehicleEvent
+
+    /// Hands the stop to Apple Maps, named so it shows up as the stop's label.
+    private func openInAppleMaps(_ coordinate: CLLocationCoordinate2D) {
+        let item: MKMapItem
+        if #available(iOS 26.0, *) {
+            item = MKMapItem(location: CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude), address: nil)
+        } else {
+            item = MKMapItem(placemark: MKPlacemark(coordinate: coordinate))
+        }
+        item.name = event.title
+        item.openInMaps()
+    }
     var body: some View {
         NavigationStack {
             List {
                 // Where it happened. The pop-up covers most of the map it was opened
                 // from (and on Duo it docks over the map half), so the stop gets its
-                // own small map. Static: a pannable map inside a list fights the
-                // list's own scrolling.
+                // own small map. Static, since a pannable map inside a list fights the
+                // list's own scrolling; tapping it opens the stop in Apple Maps instead.
                 if let coordinate = event.coordinate {
                     Section {
-                        Map(initialPosition: .region(MKCoordinateRegion(center: coordinate, latitudinalMeters: 1500, longitudinalMeters: 1500)), interactionModes: []) {
-                            Marker(event.title, systemImage: event.icon, coordinate: coordinate).tint(event.color)
+                        Button { openInAppleMaps(coordinate) } label: {
+                            Map(initialPosition: .region(MKCoordinateRegion(center: coordinate, latitudinalMeters: 1500, longitudinalMeters: 1500)), interactionModes: []) {
+                                Marker(event.title, systemImage: event.icon, coordinate: coordinate).tint(event.color)
+                            }
+                            .frame(height: 180)
+                            .overlay(alignment: .bottomTrailing) {
+                                Label("Open in Maps", systemImage: "arrow.up.forward.app")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.primary)
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 6)
+                                    .background(.regularMaterial, in: Capsule())
+                                    .padding(8)
+                            }
                         }
-                        .frame(height: 180)
+                        .buttonStyle(.plain)
                         .listRowInsets(EdgeInsets())
-                        .accessibilityLabel("Map showing \(event.title)")
+                        .accessibilityLabel("Open \(event.title) in Apple Maps")
                     }
                 }
                 Section("Log Information") { LabeledContent("Location", value: event.title); LabeledContent("Date", value: event.date.formatted(date: .abbreviated, time: .shortened)); LabeledContent("Cost", value: event.cost.formatted(.currency(code: event.vehicle?.currencyRaw ?? "USD"))); if let odo = event.odometer { LabeledContent("Odometer", value: "\(Int(odo).formatted())") } }
