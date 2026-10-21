@@ -3,10 +3,115 @@ import SwiftData
 import Combine
 import FuelLogShared
 
+/// A vehicle's own settings (not its logs), carried in a CSV as one `Vehicle`
+/// row with the details as JSON in the last column. Without it an exported file
+/// only knew each vehicle's *name*, so importing it elsewhere gave a vehicle with
+/// every other detail - make, model, year, tank size, units, currency,
+/// maintenance intervals, purchase info - back at its default.
+///
+/// Everything is optional so a partial or older file still loads, and unit
+/// values are checked against their enums before they're applied. The photo is
+/// left out: it would swamp the file.
+struct VehicleCSVDetails: Codable {
+    var make: String?
+    var model: String?
+    var year: Int?
+    var fuelType: String?
+    var odometerUnit: String?
+    var fuelUnit: String?
+    var efficiencyUnit: String?
+    var currency: String?
+    var defaultGrade: String?
+    var customGradeLabel: String?
+    var tankCapacity: Double?
+    var batteryCapacity: Double?
+    var usesAdBlue: Bool?
+    var adBlueCapacity: Double?
+    var maintenanceInterval: Double?
+    var maintenanceIntervalMonths: Double?
+    var purchaseDate: Date?
+    var purchasePrice: Double?
+    var currentValue: Double?
+    var isArchived: Bool?
+
+    init(vehicle v: Vehicle) {
+        make = v.make; model = v.model; year = v.year
+        fuelType = v.fuelTypeRaw; odometerUnit = v.odometerUnitRaw; fuelUnit = v.fuelUnitRaw
+        efficiencyUnit = v.efficiencyUnitRaw; currency = v.currencyRaw
+        defaultGrade = v.defaultGradeRaw; customGradeLabel = v.customGradeLabel
+        tankCapacity = v.tankCapacity; batteryCapacity = v.batteryCapacity
+        usesAdBlue = v.usesAdBlue; adBlueCapacity = v.adBlueCapacity
+        maintenanceInterval = v.maintenanceInterval; maintenanceIntervalMonths = v.maintenanceIntervalMonths
+        purchaseDate = v.purchaseDate; purchasePrice = v.purchasePrice; currentValue = v.currentValue
+        isArchived = v.isArchived
+    }
+
+    /// The single CSV field holding these details.
+    var csvField: String {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        encoder.outputFormatting = [.sortedKeys]
+        return (try? String(data: encoder.encode(self), encoding: .utf8)) ?? ""
+    }
+
+    init?(csvField: String) {
+        guard !csvField.isEmpty, let data = csvField.data(using: .utf8) else { return nil }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        guard let decoded = try? decoder.decode(VehicleCSVDetails.self, from: data) else { return nil }
+        self = decoded
+    }
+
+    /// Writes these details onto `vehicle`. Unit and type values that don't match
+    /// a known case are skipped rather than stored.
+    func apply(to v: Vehicle) {
+        if let make { v.make = make }
+        if let model { v.model = model }
+        if let year { v.year = year }
+        if let fuelType, FuelType(rawValue: fuelType) != nil { v.fuelTypeRaw = fuelType }
+        if let odometerUnit, OdometerUnit(rawValue: odometerUnit) != nil { v.odometerUnitRaw = odometerUnit }
+        if let fuelUnit, FuelUnit(rawValue: fuelUnit) != nil { v.fuelUnitRaw = fuelUnit }
+        if let efficiencyUnit, EfficiencyUnit(rawValue: efficiencyUnit) != nil { v.efficiencyUnitRaw = efficiencyUnit }
+        if let currency, Currency(rawValue: currency) != nil { v.currencyRaw = currency }
+        if let defaultGrade { v.defaultGradeRaw = defaultGrade }
+        if let customGradeLabel { v.customGradeLabel = customGradeLabel }
+        if let tankCapacity { v.tankCapacity = tankCapacity }
+        if let batteryCapacity { v.batteryCapacity = batteryCapacity }
+        if let usesAdBlue { v.usesAdBlue = usesAdBlue }
+        if let adBlueCapacity { v.adBlueCapacity = adBlueCapacity }
+        if let maintenanceInterval { v.maintenanceInterval = maintenanceInterval }
+        if let maintenanceIntervalMonths { v.maintenanceIntervalMonths = maintenanceIntervalMonths }
+        if let purchaseDate { v.purchaseDate = purchaseDate }
+        if let purchasePrice { v.purchasePrice = purchasePrice }
+        if let currentValue { v.currentValue = currentValue }
+        if let isArchived { v.isArchived = isArchived }
+    }
+}
+
+extension Vehicle {
+    /// A vehicle nobody has filled in: no make, model, year, capacities or
+    /// purchase info. One an earlier import created from a bare CSV is like this,
+    /// so a later file that does carry its details may complete it - a vehicle
+    /// the user has edited is never overwritten.
+    var isBareFromImport: Bool {
+        make.isEmpty && model.isEmpty && year == nil && tankCapacity == nil
+            && batteryCapacity == nil && purchaseDate == nil && purchasePrice == nil
+    }
+}
+
 @MainActor
 class CSVImporter: ObservableObject {
     @Published var isImporting = false
     @Published var importProgress: Double = 0.0
+
+    /// Index of the last column of a native export: a `Vehicle` row's settings as JSON
+    /// (columns 1-18 are the logs, 19-20 a stop's coordinates).
+    static let vehicleDetailsColumn = 20
+
+    /// Existing vehicles a file's `Vehicle` rows filled in during the current import.
+    /// Counted as imported work, so a file that only completes a vehicle isn't
+    /// reported as "Nothing Imported".
+    private var vehiclesCompleted = 0
 
     /// Fill-ups, services and (non-placeholder) trips currently stored.
     /// Compared before and after an import to count what it actually added.
@@ -14,7 +119,8 @@ class CSVImporter: ObservableObject {
         let fillUps = (try? modelContext.fetchCount(FetchDescriptor<FillUp>())) ?? 0
         let services = (try? modelContext.fetchCount(FetchDescriptor<ServiceRecord>())) ?? 0
         let trips = ((try? modelContext.fetch(FetchDescriptor<Trip>())) ?? []).filter { !$0.name.hasPrefix("Since Day One") }.count
-        return fillUps + services + trips
+        let vehicles = (try? modelContext.fetchCount(FetchDescriptor<Vehicle>())) ?? 0
+        return fillUps + services + trips + vehicles
     }
 
     /// Returns how many records the import added. Zero means nothing matched
@@ -26,6 +132,7 @@ class CSVImporter: ObservableObject {
         isImporting = true
         importProgress = 0.0
         let before = recordCount(modelContext)
+        vehiclesCompleted = 0
         defer { isImporting = false }
 
         let rows = parseCSV(data)
@@ -59,7 +166,7 @@ class CSVImporter: ObservableObject {
             }
         }
 
-        let added = max(0, recordCount(modelContext) - before)
+        let added = max(0, recordCount(modelContext) - before) + vehiclesCompleted
         // Stops with only a name (older exports, other apps' files) get their map
         // positions looked up in the background; the pins appear as they resolve.
         if added > 0 { LocationGeocoder.shared.fillMissingInBackground(modelContext: modelContext) }
@@ -102,6 +209,13 @@ class CSVImporter: ObservableObject {
             energyKinds[row[0]] = kinds
         }
 
+        // `Vehicle` rows carry each vehicle's own settings (see VehicleCSVDetails), in the
+        // last column. Gathered up front so they apply however the file is ordered.
+        var vehicleDetails: [String: VehicleCSVDetails] = [:]
+        for row in rows.dropFirst() where row.count > Self.vehicleDetailsColumn && row[1] == "Vehicle" {
+            if let details = VehicleCSVDetails(csvField: row[Self.vehicleDetailsColumn]) { vehicleDetails[row[0]] = details }
+        }
+
         // Vehicles with AdBlue / DEF top-up rows have the system, so a new one is a diesel that uses it.
         let adBlueVehicles = Set(rows.dropFirst().filter { $0.count >= 8 && $0[1] == "Service" && $0[5] == ServiceType.adBlue.rawValue }.map { $0[0] })
 
@@ -112,9 +226,14 @@ class CSVImporter: ObservableObject {
             let vehicleName = row[0], recordType = row[1], dateStr = row[2], odoStr = row[3]
             let costStr = row[4], detailsStr = row[5], locStr = row[6], notesStr = row[7]
 
+            // A `Vehicle` row only carries settings, handled above.
+            guard recordType != "Vehicle" else { continue }
+
             let vehicle: Vehicle
             if let existing = existingVehicles.first(where: { $0.name == vehicleName }) {
                 vehicle = existing
+                // An earlier bare import left this vehicle at its defaults; complete it.
+                if existing.isBareFromImport, let details = vehicleDetails.removeValue(forKey: vehicleName) { details.apply(to: existing); vehiclesCompleted += 1 }
             } else {
                 let kinds = energyKinds[vehicleName] ?? (0, 0)
                 if kinds.kWh > 0 && kinds.fuel == 0 {
@@ -127,6 +246,8 @@ class CSVImporter: ObservableObject {
                 } else {
                     vehicle = Vehicle(name: vehicleName)
                 }
+                // The file's own details beat the guess above.
+                if let details = vehicleDetails.removeValue(forKey: vehicleName) { details.apply(to: vehicle) }
                 modelContext.insert(vehicle)
                 existingVehicles.append(vehicle)
                 modelContext.insert(Trip(name: "Since Day One - \(vehicleName)", startDate: .distantPast, endDate: .distantFuture, vehicle: vehicle))
@@ -170,6 +291,19 @@ class CSVImporter: ObservableObject {
                     let fullFlag: Bool? = row.count > 17 && !row[17].isEmpty ? row[17] == "1" : nil
                     modelContext.insert(ServiceRecord(date: date, odometer: odo ?? 0, type: type, cost: cost, notes: notesStr, vehicle: vehicle, location: loc, volume: fluidVolume, filledToFull: fullFlag))
                 }
+            }
+        }
+        // Details left over belong to vehicles the log rows didn't reach: a vehicle with no
+        // logs in the file is created, and an existing bare one is completed.
+        for (name, details) in vehicleDetails {
+            if let existing = existingVehicles.first(where: { $0.name == name }) {
+                if existing.isBareFromImport { details.apply(to: existing); vehiclesCompleted += 1 }
+            } else {
+                let vehicle = Vehicle(name: name)
+                details.apply(to: vehicle)
+                modelContext.insert(vehicle)
+                existingVehicles.append(vehicle)
+                modelContext.insert(Trip(name: "Since Day One - \(name)", startDate: .distantPast, endDate: .distantFuture, vehicle: vehicle))
             }
         }
         try? modelContext.save()
