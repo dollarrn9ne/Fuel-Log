@@ -111,6 +111,13 @@ struct MainDashboardView: View {
     /// Duo's outer display: the resting pill's real top edge (global Y), measured
     /// by the sheet content. Nil elsewhere.
     @State private var measuredOuterRestingTop: CGFloat?
+    /// Duo's inner display in portrait with the hinge partly open (book mode): the
+    /// height of the resting pill (visible height, ending just below the search bar)
+    /// and what the sheet adds under a `.height` stop, both measured by the sheet
+    /// content. Used only while `bookModeActive`.
+    @State private var measuredBookModeHeight: CGFloat?
+    @State private var measuredBookModeInset: CGFloat = 0
+    @State private var bookModeActive = false
     /// Book mode on Duo: the panel slides over to the hinge and covers this much
     /// of the map's width (0 otherwise), and the map's own width. The map's
     /// padding stays at the fixed panel width - changing a Map's safe-area padding
@@ -458,6 +465,11 @@ struct MainDashboardView: View {
     /// column live in relocatedIconRow instead, positioned independently
     /// of whatever width this pill has.
 
+    /// Duo's inner display in portrait with the hinge partly open (book mode).
+    private func isDuoBookModePortrait(_ proxy: GeometryProxy) -> Bool {
+        trailingClusterWidth(proxy) == 0 && sheetIconClusterWidth(proxy) > 0 && hingeIsPartiallyOpen
+    }
+
     /// Whether the sheet also offers the middle (65%) detent. Only Duo goes
     /// without it - its outer display is too small for a third stop, and the
     /// inner display and Split View panes follow suit. A regular iPhone keeps
@@ -478,7 +490,11 @@ struct MainDashboardView: View {
             // Book mode in portrait: the pill rises to the Apple Maps logo, whose
             // position is worked out for a 42% pill. The shorter fixed pill left a
             // wide gap between the logo and the pill's top edge.
-            return hingeIsPartiallyOpen ? .fraction(0.42) : .custom(DuoInnerRestingPillDetent.self)
+            if hingeIsPartiallyOpen {
+                if bookModeActive, let height = measuredBookModeHeight { return .height(max(height - measuredBookModeInset, 0)) }
+                return .fraction(0.42)
+            }
+            return .custom(DuoInnerRestingPillDetent.self)
         }
         if offersMiddleDetent(proxy), let measured = measuredSmallHeight {
             return .height(max(measured - measuredBottomInset, 0))
@@ -508,6 +524,7 @@ struct MainDashboardView: View {
     /// The small stop's height (measured on a regular iPhone).
     private func smallSheetHeight(_ containerHeight: CGFloat) -> CGFloat {
         if let top = measuredOuterRestingTop { return max(containerHeight - top, 0) }
+        if bookModeActive, let height = measuredBookModeHeight { return height }
         return (sheetOffersMiddle ? measuredSmallHeight : nil) ?? containerHeight * Self.smallestSheetFraction
     }
 
@@ -534,7 +551,10 @@ struct MainDashboardView: View {
             if middle != measuredMiddleHeight, abs((middle ?? -100) - (measuredMiddleHeight ?? -200)) > 0.5 { measuredMiddleHeight = middle }
         } : nil, onMeasureRestingTop: trailingClusterWidth(proxy) > 0 ? { top in
             if measuredOuterRestingTop == nil || abs(top - (measuredOuterRestingTop ?? 0)) > 0.5 { measuredOuterRestingTop = top }
-        } : nil, clusterWidth: sheetIconClusterWidth(proxy), screenHeight: fullHeight(proxy), duoBookModePortrait: trailingClusterWidth(proxy) == 0 && sheetIconClusterWidth(proxy) > 0 && hingeIsPartiallyOpen, relocatedColumnNeedsManualInset: trailingClusterWidth(proxy) == 0, hidesInlineIcons: isLeadingSplitViewPane(proxy), leadingPaneIconColumn: isLeadingSplitViewPane(proxy), showingAddFillUp: $showingAddFillUp, fillUpEntryMode: $fillUpEntryMode, showingAddService: $showingAddService, showingTrips: $showingTrips, showingSettings: $showingSettings, showingArchivedVehicles: $showingArchivedVehicles, showingAddVehicle: $showingAddVehicle, showingDeleteConfirmation: $showingDeleteConfirmation, showingCharts: $showingCharts, showingMonthlyReport: $showingMonthlyReport, monthlyReportMonth: $monthlyReportMonth, eventToEdit: $eventToEdit, vehicleToEdit: $vehicleToEdit)
+        } : nil, clusterWidth: sheetIconClusterWidth(proxy), screenHeight: fullHeight(proxy), duoBookModePortrait: isDuoBookModePortrait(proxy), onMeasureBookMode: isDuoBookModePortrait(proxy) ? { height, inset in
+            if abs(inset - measuredBookModeInset) > 0.5 { measuredBookModeInset = inset }
+            if let height, abs(height - (measuredBookModeHeight ?? -100)) > 0.5 { measuredBookModeHeight = height }
+        } : nil, relocatedColumnNeedsManualInset: trailingClusterWidth(proxy) == 0, hidesInlineIcons: isLeadingSplitViewPane(proxy), leadingPaneIconColumn: isLeadingSplitViewPane(proxy), showingAddFillUp: $showingAddFillUp, fillUpEntryMode: $fillUpEntryMode, showingAddService: $showingAddService, showingTrips: $showingTrips, showingSettings: $showingSettings, showingArchivedVehicles: $showingArchivedVehicles, showingAddVehicle: $showingAddVehicle, showingDeleteConfirmation: $showingDeleteConfirmation, showingCharts: $showingCharts, showingMonthlyReport: $showingMonthlyReport, monthlyReportMonth: $monthlyReportMonth, eventToEdit: $eventToEdit, vehicleToEdit: $vehicleToEdit)
             .presentationDetents(middleDetent(proxy).map { [restingDetent(proxy), $0, .large] } ?? [restingDetent(proxy), .large], selection: $sheetDetent)
             .presentationDragIndicator(.visible).presentationBackgroundInteraction(.enabled(upThrough: middleDetent(proxy) ?? restingDetent(proxy))).interactiveDismissDisabled()
             .presentationBackground { panelBackground(in: Rectangle()) }
@@ -850,6 +870,11 @@ struct MainDashboardView: View {
         // Measured stops only exist for a regular iPhone; forget them as soon as the
         // layout stops being one (a fold, a Split View pane). Here rather than in
         // the sheet, which isn't on screen in the layouts that need this to run.
+        // Likewise the book-mode pill's measured height: forget it when the posture ends.
+        .onChange(of: isDuoBookModePortrait(proxy), initial: true) { _, on in
+            bookModeActive = on
+            if !on { measuredBookModeHeight = nil; measuredBookModeInset = 0 }
+        }
         .onChange(of: offersMiddleDetent(proxy), initial: true) { _, offered in
             sheetOffersMiddle = offered
             if !offered { measuredSmallHeight = nil; measuredMiddleHeight = nil; measuredBottomInset = 0 }
@@ -893,7 +918,7 @@ struct MainDashboardView: View {
         }
         // The stops moved (measured, or content changed): re-frame the pins to
         // the new heights, zoom included since it's sized to the tallest stop.
-        .onChange(of: [measuredSmallHeight ?? 0, measuredMiddleHeight ?? 0, measuredBottomInset]) { _, _ in
+        .onChange(of: [measuredSmallHeight ?? 0, measuredMiddleHeight ?? 0, measuredBottomInset, measuredBookModeHeight ?? 0]) { _, _ in
             refitMap(containerHeight: fullHeight(proxy), refreshZoom: true)
         }
         // Menu commands whose state lives on this view.
@@ -1502,6 +1527,7 @@ struct DashboardSheetContent: View {
         var header: CGFloat
         var logTabs: CGFloat?
         var firstRow: CGFloat?
+        var search: CGFloat?
         var safeBottom: CGFloat
     }
     /// Width of Duo's outer-display reserved control column, or 0 elsewhere
@@ -1525,6 +1551,12 @@ struct DashboardSheetContent: View {
     /// resting pill is 42% of the screen, not the fixed short inner-portrait one,
     /// so the relocated icon column is centred against that height instead.
     var duoBookModePortrait: Bool = false
+    /// Book mode in portrait only: reports the sheet height that ends just below the
+    /// search bar, so the whole bar shows in the taller pill that pose uses. Measured
+    /// from the content (a fixed height would cut the bar off as soon as the
+    /// maintenance card shifted everything down).
+    var onMeasureBookMode: ((_ visibleHeight: CGFloat?, _ bottomInset: CGFloat) -> Void)? = nil
+    @State private var measuredSearchBottom: CGFloat?
     /// True only when `clusterWidth` is a synthetic stand-in rather than a
     /// real system-reported safe area (Duo's unfolded inner display,
     /// rotated into `.bottomSheet` - see
@@ -1712,6 +1744,7 @@ struct DashboardSheetContent: View {
                     }
                     .padding(10)
                     .applyLiquidGlassOrBackground(cornerRadius: 12, fallbackColor: .tertiarySystemGroupedBackground)
+                    .onGeometryChange(for: CGFloat.self) { $0.frame(in: .named(Self.scrollContentSpace)).maxY } action: { measuredSearchBottom = $0 }
                     .padding(.horizontal, 24)
                     .padding(.bottom, 16)
 
@@ -1723,10 +1756,11 @@ struct DashboardSheetContent: View {
             }
         }
         .onGeometryChange(for: CGFloat.self) { $0.safeAreaInsets.bottom } action: { measuredSafeBottom = $0 }
-        .onChange(of: StopMeasurements(header: measuredHeaderHeight, logTabs: measuredLogTabsBottom, firstRow: measuredFirstRowBottom, safeBottom: measuredSafeBottom), initial: true) { _, m in
-            guard let onMeasureStops, m.header > 0 else { return }
+        .onChange(of: StopMeasurements(header: measuredHeaderHeight, logTabs: measuredLogTabsBottom, firstRow: measuredFirstRowBottom, search: measuredSearchBottom, safeBottom: measuredSafeBottom), initial: true) { _, m in
+            guard m.header > 0 else { return }
             // Visible sheet heights (content bottom + margin); the parent subtracts the inset.
-            onMeasureStops(m.logTabs.map { m.header + $0 + Self.stopMargin }, m.firstRow.map { m.header + $0 + Self.stopMargin }, m.safeBottom)
+            onMeasureStops?(m.logTabs.map { m.header + $0 + Self.stopMargin }, m.firstRow.map { m.header + $0 + Self.stopMargin }, m.safeBottom)
+            onMeasureBookMode?(m.search.map { m.header + $0 + Self.stopMargin }, m.safeBottom)
         }
         // See `relocatedColumnNeedsManualInset`'s own doc comment: the real
         // outer-display case needs nothing here because a real safe area
@@ -1993,7 +2027,8 @@ struct DashboardSheetContent: View {
     /// `relocatedColumnNeedsManualInset`), everything else the plain
     /// fraction of the screen.
     private var restingPillHeight: CGFloat {
-        (relocatedColumnNeedsManualInset && clusterWidth > 0 && !duoBookModePortrait) ? DuoInnerRestingPillDetent.fixedHeight : screenHeight * Self.smallestSheetFraction
+        if duoBookModePortrait, measuredHeaderHeight > 0, let search = measuredSearchBottom { return measuredHeaderHeight + search + Self.stopMargin }
+        return (relocatedColumnNeedsManualInset && clusterWidth > 0 && !duoBookModePortrait) ? DuoInnerRestingPillDetent.fixedHeight : screenHeight * Self.smallestSheetFraction
     }
 
     /// `quickIconColumn`'s own rendered height: 4 buttons at
