@@ -627,17 +627,12 @@ struct SettingsView: View {
             NavigationLink { RatePlansView() } label: {
                 Label("Home Charging Rates", systemImage: "bolt.fill")
             }
-            // No divider between the row and its caption: it started at the row's
-            // title while the caption starts at the card edge, so the two never
-            // lined up. The caption reads as part of the row instead.
-            .listRowSeparator(.hidden)
             // Two short lines of similar length, each meant to fit on one line:
             // SwiftUI can't balance a wrapped paragraph, and one long sentence
             // left a short orphan on its last line.
             Text("Fixed, time of use, tiered or seasonal plans.\nHome charges are priced from your plan.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
-                .listRowSeparator(.hidden)
         }
     }
 

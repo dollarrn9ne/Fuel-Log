@@ -475,7 +475,10 @@ struct MainDashboardView: View {
     /// in portrait (see `DuoInnerRestingPillDetent`), else 42%.
     private func restingDetent(_ proxy: GeometryProxy) -> PresentationDetent {
         if trailingClusterWidth(proxy) == 0 && sheetIconClusterWidth(proxy) > 0 {
-            return .custom(DuoInnerRestingPillDetent.self)
+            // Book mode in portrait: the pill rises to the Apple Maps logo, whose
+            // position is worked out for a 42% pill. The shorter fixed pill left a
+            // wide gap between the logo and the pill's top edge.
+            return hingeIsPartiallyOpen ? .fraction(0.42) : .custom(DuoInnerRestingPillDetent.self)
         }
         if offersMiddleDetent(proxy), let measured = measuredSmallHeight {
             return .height(max(measured - measuredBottomInset, 0))
@@ -531,7 +534,7 @@ struct MainDashboardView: View {
             if middle != measuredMiddleHeight, abs((middle ?? -100) - (measuredMiddleHeight ?? -200)) > 0.5 { measuredMiddleHeight = middle }
         } : nil, onMeasureRestingTop: trailingClusterWidth(proxy) > 0 ? { top in
             if measuredOuterRestingTop == nil || abs(top - (measuredOuterRestingTop ?? 0)) > 0.5 { measuredOuterRestingTop = top }
-        } : nil, clusterWidth: sheetIconClusterWidth(proxy), screenHeight: fullHeight(proxy), relocatedColumnNeedsManualInset: trailingClusterWidth(proxy) == 0, hidesInlineIcons: isLeadingSplitViewPane(proxy), leadingPaneIconColumn: isLeadingSplitViewPane(proxy), showingAddFillUp: $showingAddFillUp, fillUpEntryMode: $fillUpEntryMode, showingAddService: $showingAddService, showingTrips: $showingTrips, showingSettings: $showingSettings, showingArchivedVehicles: $showingArchivedVehicles, showingAddVehicle: $showingAddVehicle, showingDeleteConfirmation: $showingDeleteConfirmation, showingCharts: $showingCharts, showingMonthlyReport: $showingMonthlyReport, monthlyReportMonth: $monthlyReportMonth, eventToEdit: $eventToEdit, vehicleToEdit: $vehicleToEdit)
+        } : nil, clusterWidth: sheetIconClusterWidth(proxy), screenHeight: fullHeight(proxy), duoBookModePortrait: trailingClusterWidth(proxy) == 0 && sheetIconClusterWidth(proxy) > 0 && hingeIsPartiallyOpen, relocatedColumnNeedsManualInset: trailingClusterWidth(proxy) == 0, hidesInlineIcons: isLeadingSplitViewPane(proxy), leadingPaneIconColumn: isLeadingSplitViewPane(proxy), showingAddFillUp: $showingAddFillUp, fillUpEntryMode: $fillUpEntryMode, showingAddService: $showingAddService, showingTrips: $showingTrips, showingSettings: $showingSettings, showingArchivedVehicles: $showingArchivedVehicles, showingAddVehicle: $showingAddVehicle, showingDeleteConfirmation: $showingDeleteConfirmation, showingCharts: $showingCharts, showingMonthlyReport: $showingMonthlyReport, monthlyReportMonth: $monthlyReportMonth, eventToEdit: $eventToEdit, vehicleToEdit: $vehicleToEdit)
             .presentationDetents(middleDetent(proxy).map { [restingDetent(proxy), $0, .large] } ?? [restingDetent(proxy), .large], selection: $sheetDetent)
             .presentationDragIndicator(.visible).presentationBackgroundInteraction(.enabled(upThrough: middleDetent(proxy) ?? restingDetent(proxy))).interactiveDismissDisabled()
             .presentationBackground { panelBackground(in: Rectangle()) }
@@ -1518,6 +1521,10 @@ struct DashboardSheetContent: View {
     /// for a differently-sized screen (Duo's unfolded inner display,
     /// rotated into `.bottomSheet` - see `MainDashboardView.sheetIconClusterWidth(_:)`).
     var screenHeight: CGFloat = 0
+    /// Duo's inner display in portrait with the hinge partly open (book mode). Its
+    /// resting pill is 42% of the screen, not the fixed short inner-portrait one,
+    /// so the relocated icon column is centred against that height instead.
+    var duoBookModePortrait: Bool = false
     /// True only when `clusterWidth` is a synthetic stand-in rather than a
     /// real system-reported safe area (Duo's unfolded inner display,
     /// rotated into `.bottomSheet` - see
@@ -1777,6 +1784,12 @@ struct DashboardSheetContent: View {
         // A different screen (folding between Duo's displays) has a different
         // resting pill, so measure it again.
         .onChange(of: screenHeight) { _, _ in restingTopReported = false }
+        // The resting pill changes height when the posture does, so the icon
+        // column's measured position has to be taken again.
+        .onChange(of: duoBookModePortrait) { _, _ in
+            measuredRestingIconTargetY = nil
+            restingTopReported = false
+        }
         }
         // Presentations for this content's own actions. Nested here rather
         // than on MainDashboardView: on iPhone this view is itself always
@@ -1980,7 +1993,7 @@ struct DashboardSheetContent: View {
     /// `relocatedColumnNeedsManualInset`), everything else the plain
     /// fraction of the screen.
     private var restingPillHeight: CGFloat {
-        (relocatedColumnNeedsManualInset && clusterWidth > 0) ? DuoInnerRestingPillDetent.fixedHeight : screenHeight * Self.smallestSheetFraction
+        (relocatedColumnNeedsManualInset && clusterWidth > 0 && !duoBookModePortrait) ? DuoInnerRestingPillDetent.fixedHeight : screenHeight * Self.smallestSheetFraction
     }
 
     /// `quickIconColumn`'s own rendered height: 4 buttons at
