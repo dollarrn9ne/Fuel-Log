@@ -6,6 +6,10 @@ struct VehicleChartsView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     let vehicle: Vehicle
+    /// Duo's left pane of Split View: the close button there is the same X icon
+    /// the right pane gets (in the reserved trailing column), instead of the text
+    /// "Close", kept at the leading edge where this pane's other controls are.
+    var closeAsIcon: Bool = false
     
     @State private var timeframe: ChartTimeframe = .sixMonths
     @State private var scrollPosition: Date = Date()
@@ -217,7 +221,11 @@ struct VehicleChartsView: View {
                 // into it as an X (see `relocatedCloseButton`).
                 if trailingClusterWidth == 0 {
                     ToolbarItem(placement: .cancellationAction) {
-                        Button("Close") { dismiss() }
+                        if closeAsIcon, #available(iOS 26.0, *) {
+                            Button(role: .close) { dismiss() }
+                        } else {
+                            Button("Close") { dismiss() }
+                        }
                     }
                 }
             }
