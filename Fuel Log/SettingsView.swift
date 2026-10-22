@@ -753,7 +753,9 @@ struct SettingsView: View {
         // anyway, leaving a customer with an empty app and no clue why.
         guard imported > 0 else { showingNothingImportedAlert = true; return }
         withAnimation { showImportSuccess = true }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+        // Longer than the other confirmations: an import is the one a person
+        // looks away from while it runs, and 2 seconds was easy to miss.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 4.0) {
             withAnimation { showImportSuccess = false }
         }
     }
