@@ -440,13 +440,13 @@ struct AddFillUpView: View {
                 let currentUnit = isChargeMode ? FuelUnit.kwh : (isCrossBorder ? foreignUnit : vehicle.fuelUnit)
                 let currentCurrency = isCrossBorder ? foreignCurrency : vehicle.currency
                 
-                FormTextField(title: "Volume (\(currentUnit.rawValue))", placeholder: "0.0", text: $volumeStr, keyboardType: .decimalPad)
-                    .focused($focusedField, equals: .volume)
-                    .onChange(of: volumeStr) { _, _ in if focusedField == .volume { fieldEdited(.volume) } }
-                
                 FormTextField(title: "Price / \(currentUnit.rawValue)", placeholder: "0.00", text: $pricePerUnitStr, keyboardType: .decimalPad)
                     .focused($focusedField, equals: .price)
                     .onChange(of: pricePerUnitStr) { _, _ in if focusedField == .price { fieldEdited(.price); if selectedRatePlan != nil, pricePerUnitStr != lastPlanPrice { planPriceOverridden = true; planPriceIsSaved = false } } }
+                
+                FormTextField(title: "Volume (\(currentUnit.rawValue))", placeholder: "0.0", text: $volumeStr, keyboardType: .decimalPad)
+                    .focused($focusedField, equals: .volume)
+                    .onChange(of: volumeStr) { _, _ in if focusedField == .volume { fieldEdited(.volume) } }
                 
                 FormTextField(title: "Total Cost (\(currentCurrency.rawValue))", placeholder: "0.00", text: $totalCostStr, keyboardType: .decimalPad)
                     .focused($focusedField, equals: .totalCost)

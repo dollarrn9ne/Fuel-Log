@@ -27,6 +27,7 @@ struct VehicleCSVDetails: Codable {
     var batteryCapacity: Double?
     var usesAdBlue: Bool?
     var adBlueCapacity: Double?
+    var vin: String?
     var maintenanceInterval: Double?
     var maintenanceIntervalMonths: Double?
     var purchaseDate: Date?
@@ -40,7 +41,7 @@ struct VehicleCSVDetails: Codable {
         efficiencyUnit = v.efficiencyUnitRaw; currency = v.currencyRaw
         defaultGrade = v.defaultGradeRaw; customGradeLabel = v.customGradeLabel
         tankCapacity = v.tankCapacity; batteryCapacity = v.batteryCapacity
-        usesAdBlue = v.usesAdBlue; adBlueCapacity = v.adBlueCapacity
+        usesAdBlue = v.usesAdBlue; adBlueCapacity = v.adBlueCapacity; vin = v.vin
         maintenanceInterval = v.maintenanceInterval; maintenanceIntervalMonths = v.maintenanceIntervalMonths
         purchaseDate = v.purchaseDate; purchasePrice = v.purchasePrice; currentValue = v.currentValue
         isArchived = v.isArchived
@@ -79,6 +80,7 @@ struct VehicleCSVDetails: Codable {
         if let batteryCapacity { v.batteryCapacity = batteryCapacity }
         if let usesAdBlue { v.usesAdBlue = usesAdBlue }
         if let adBlueCapacity { v.adBlueCapacity = adBlueCapacity }
+        if let vin { v.vin = vin }
         if let maintenanceInterval { v.maintenanceInterval = maintenanceInterval }
         if let maintenanceIntervalMonths { v.maintenanceIntervalMonths = maintenanceIntervalMonths }
         if let purchaseDate { v.purchaseDate = purchaseDate }

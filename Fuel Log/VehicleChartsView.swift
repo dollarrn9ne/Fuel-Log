@@ -235,7 +235,7 @@ struct VehicleChartsView: View {
             .onChange(of: customEnd) { _, _ in resetScrollPosition() }
         }
         .onGeometryChange(for: CGFloat.self) { $0.safeAreaInsets.trailing } action: { trailingInset = $0 }
-        .overlay(alignment: .topTrailing) {
+        .overlay(alignment: .bottomTrailing) {
             if trailingClusterWidth > 0 { relocatedCloseButton }
         }
     }
@@ -245,12 +245,11 @@ struct VehicleChartsView: View {
     @State private var trailingInset: CGFloat = 0
     private var trailingClusterWidth: CGFloat { trailingInset > 70 ? trailingInset : 0 }
 
-    /// Close as an X in Duo's reserved trailing column, below the status
-    /// cluster - requested directly, replacing the text "Close" button at
-    /// the top leading edge. Same placement maths as the dashboard's map
-    /// buttons and `TripsListView.relocatedButtons`: 165pt clearance (the
-    /// cluster is ~176pt tall), centred in the column with the 6pt
-    /// correction, `ignoresSafeArea` so it can reach into the column.
+    /// Close as an X in Duo's reserved trailing column, at the bottom -
+    /// the same spot as Settings' close button - so it never sits under the
+    /// status cluster, which grows taller while location is in use. Centred
+    /// in the column with the 6pt correction, `ignoresSafeArea` so it can
+    /// reach into the column.
     private var relocatedCloseButton: some View {
         Button { dismiss() } label: {
             let icon = Image(systemName: "xmark")
@@ -265,9 +264,11 @@ struct VehicleChartsView: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Close")
-        .padding(.top, 165)
+        // Same offsets as Settings' outer-display close button
+        // (`SettingsView.outerDisplayCloseButton`), so both sit at the same height.
+        .padding(.bottom, 18)
         .padding(.trailing, max(0, (trailingClusterWidth - 44) / 2 + 6))
-        .ignoresSafeArea(.container, edges: .trailing)
+        .ignoresSafeArea(.container, edges: [.trailing, .bottom])
     }
 
     /// Wide enough on an iPad, or an unfolded Duo, to earn taller charts and a

@@ -58,6 +58,9 @@ public enum EfficiencyConverter {
     public var usesAdBlue: Bool = false
     /// Size of the AdBlue / DEF tank, in the vehicle's fuel unit (litres or gallons).
     public var adBlueCapacity: Double?
+    /// Vehicle Identification Number, entered by hand. Optional so existing
+    /// vehicles (and older synced records) simply have none.
+    public var vin: String?
 
     public var maintenanceInterval: Double = 5000.0
     public var maintenanceIntervalMonths: Double = 6.0

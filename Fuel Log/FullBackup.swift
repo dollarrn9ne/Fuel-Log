@@ -55,6 +55,8 @@ struct BackupVehicle: Codable {
     /// Optional so backups written before AdBlue / DEF tracking still decode.
     var usesAdBlue: Bool?
     var adBlueCapacity: Double?
+    /// Optional so backups written before VIN support still decode.
+    var vin: String?
     var maintenanceInterval: Double
     var maintenanceIntervalMonths: Double
     var purchaseDate: Date?
@@ -181,7 +183,7 @@ enum FullBackup {
                     efficiencyUnitRaw: v.efficiencyUnitRaw, currencyRaw: v.currencyRaw,
                     defaultGradeRaw: v.defaultGradeRaw, customGradeLabel: v.customGradeLabel,
                     tankCapacity: v.tankCapacity, batteryCapacity: v.batteryCapacity,
-                    usesAdBlue: v.usesAdBlue, adBlueCapacity: v.adBlueCapacity,
+                    usesAdBlue: v.usesAdBlue, adBlueCapacity: v.adBlueCapacity, vin: v.vin,
                     maintenanceInterval: v.maintenanceInterval, maintenanceIntervalMonths: v.maintenanceIntervalMonths,
                     purchaseDate: v.purchaseDate, purchasePrice: v.purchasePrice, currentValue: v.currentValue,
                     isArchived: v.isArchived,
@@ -328,6 +330,7 @@ enum FullBackup {
             object.isArchived = vehicle.isArchived
             object.usesAdBlue = vehicle.usesAdBlue ?? false
             object.adBlueCapacity = vehicle.adBlueCapacity
+            object.vin = vehicle.vin
             context.insert(object)
 
             for fillUp in vehicle.fillUps {

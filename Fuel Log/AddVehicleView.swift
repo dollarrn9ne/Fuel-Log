@@ -59,6 +59,7 @@ struct AddVehicleView: View {
     @State private var tankCapacityStr: String = ""
     @State private var batteryCapacityStr: String = ""
     @State private var usesAdBlue: Bool = false
+    @State private var vin: String = ""
     @State private var adBlueCapacityStr: String = ""
     @State private var maintenanceIntervalStr: String = "5000"
     @State private var maintenanceIntervalMonthsStr: String = "6"
@@ -100,6 +101,9 @@ struct AddVehicleView: View {
             .padding(.vertical, 8)
             
             Section("Basic Information") {
+                FormTextField(title: "VIN", placeholder: "17 characters (optional)", text: $vin)
+                    .textInputAutocapitalization(.characters)
+                    .autocorrectionDisabled()
                 FormTextField(title: "Name", placeholder: "e.g., My Daily", text: $name)
                 FormTextField(title: "Make", placeholder: "e.g., Honda", text: $make)
                 FormTextField(title: "Model", placeholder: "e.g., Civic", text: $model)
@@ -143,7 +147,7 @@ struct AddVehicleView: View {
         .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }; ToolbarItem(placement: .confirmationAction) { Button("Save") { saveVehicle() }.disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) } }
         .onAppear {
             if let v = editingVehicle {
-                name = v.name; make = v.make; model = v.model;
+                name = v.name; make = v.make; model = v.model; vin = v.vin ?? ""
                 if let y = v.year { yearStr = "\(y)" };
                 fuelType = v.fuelType; odometerUnit = v.odometerUnit; fuelUnit = v.fuelUnit; efficiencyUnit = v.efficiencyUnit; currency = v.currency; maintenanceIntervalStr = "\(Int(v.maintenanceInterval))"; maintenanceIntervalMonthsStr = "\(Int(v.maintenanceIntervalMonths))"
                 if let cap = v.tankCapacity { tankCapacityStr = "\(cap)" }
@@ -180,6 +184,8 @@ struct AddVehicleView: View {
         // Only a diesel with the switch on keeps AdBlue settings.
         let finalUsesAdBlue = fuelType == .diesel && usesAdBlue
         let parsedAdBlueCapacity: Double? = finalUsesAdBlue ? Double(adBlueCapacityStr.replacingOccurrences(of: ",", with: ".")) : nil
+        let trimmedVIN = vin.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        let finalVIN: String? = trimmedVIN.isEmpty ? nil : trimmedVIN
         // Only meaningful alongside the "Other" grade.
         let trimmedGradeLabel = customGradeLabel.trimmingCharacters(in: .whitespacesAndNewlines)
         let finalGradeLabel: String? = (defaultGrade == .other && !trimmedGradeLabel.isEmpty) ? trimmedGradeLabel : nil
@@ -193,6 +199,7 @@ struct AddVehicleView: View {
             v.batteryCapacity = parsedBatteryCapacity
             v.usesAdBlue = finalUsesAdBlue
             v.adBlueCapacity = parsedAdBlueCapacity
+            v.vin = finalVIN
             v.defaultFuelGrade = defaultGrade
             v.customGradeLabel = finalGradeLabel
             v.photoData = photoData
@@ -203,6 +210,7 @@ struct AddVehicleView: View {
             newVehicle.maintenanceIntervalMonths = Double(maintenanceIntervalMonthsStr) ?? 6.0
             newVehicle.usesAdBlue = finalUsesAdBlue
             newVehicle.adBlueCapacity = parsedAdBlueCapacity
+            newVehicle.vin = finalVIN
             newVehicle.defaultFuelGrade = defaultGrade
             newVehicle.customGradeLabel = finalGradeLabel
             newVehicle.photoData = photoData

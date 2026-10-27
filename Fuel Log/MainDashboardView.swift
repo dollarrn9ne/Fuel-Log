@@ -297,7 +297,11 @@ struct MainDashboardView: View {
     /// cluster is 176pt tall (wifi ring ends at ~154), so at 130 the
     /// locate button (130-177) sat half underneath it and read as faded or
     /// missing.
-    private static let trailingClusterHeightEstimate: CGFloat = 165
+    ///
+    /// Raised again to 188: while location is in use the cluster gains an
+    /// arrow indicator and its glass bubble ends ~177pt down, so at 165 the
+    /// locate button sat under it (real-device check).
+    private static let trailingClusterHeightEstimate: CGFloat = 188
 
     /// The map controls' own rendered diameter (title3 icon + 12pt padding),
     /// used to centre them inside the reserved column rather than clear of
